@@ -135,6 +135,7 @@ extern "C" void OpenNewMenu(void);
 extern "C" void RenderNewMenuOverlay(void);
 
 extern ImFont* mainFont;
+ImFont* mainFont = nullptr;
 
 // HMOOD__TG@i_8_f
 
