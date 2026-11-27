@@ -142,6 +142,135 @@ extern ImFont* mainFont;
 bool MenDeal;
 ImFont* cyberMenuFont = nullptr;
 
+bool IsLogin = false;
+bool hideNameKillMsg = false;
+bool textBorder = false;
+bool hideHacker = false;
+bool Enable = false;
+bool 自动开火 = false;
+float 追踪概率 = 0.f;
+bool ifismembotenable = false;
+bool MagicSDK = false;
+bool IsFastSwitch = false;
+bool IsFastDrop = false;
+bool chaynhanhv2 = false;
+bool IsNocamerashake = false;
+bool IsNorecoil2 = false;
+bool IsFastshoot = false;
+bool IsCrossHair = false;
+bool isSpinning = false;
+bool WideView = false;
+bool MemoryFastScope = false;
+bool MemoryZoom = false;
+bool MemoryDamage = false;
+bool MemoryRainbow = false;
+bool MemoryCrossSpin = false;
+float MemoryZoomFov = 60.f;
+float MemoryRainbowSpeed = 1.f;
+float MemoryCrossSpinSpeed = 0.f;
+bool HitX = false;
+int WideValue = 110;
+float tocdoquay = 0.f;
+float crosshairSizeSlider = 5.f;
+
+float ESPMaxDistance = 300.f;
+float globalHpAlphaF = 1.f;
+int IsStyle = 0;
+float AlertRadius = 50.f;
+float strokeIntensity = 1.f;
+float SilentAimMaxDistance = 250.f;
+float Cross = 100.f;
+float AimSmooth = 5.f;
+float magicX = 0.f;
+float magicY = 0.f;
+float magicZ = 0.f;
+
+float AimF = 0.f;
+bool Blacksky = false;
+bool CL = false;
+bool CarFly = false;
+bool Config = false;
+float DanceValue = 0.f;
+float DancerValue = 0.f;
+bool FixShoot = false;
+float Gun_Size = 0.f;
+bool IsHitXPL = false;
+bool IsLaunch = false;
+bool Radar = false;
+float RadarX = 0.f;
+float RadarY = 0.f;
+bool ReCo = false;
+bool ResetGuest = false;
+bool ShowFov = false;
+bool VisCheck = false;
+void* g_LocalController = nullptr;
+float g_disstance = 0.f;
+bool initialized = false;
+int screenWidth = 0;
+int screenHeight = 0;
+float carx = 0.f, cary = 0.f, carz = 0.f;
+bool tudongnhay = false;
+bool 下雨 = false;
+bool 下雪特效 = false;
+bool 人物变大 = false;
+bool 人物自杀 = false;
+bool 坐标追 = false;
+bool 巨人 = false;
+bool 打击圈 = false;
+bool 据点 = false;
+bool 枪械变大 = false;
+bool 瞄准线 = false;
+bool 重置游客 = false;
+
+ImU32 COLOR_Distance = IM_COL32(255, 255, 255, 255);
+ImColor bgColor = ImColor(1.f, 1.f, 1.f, 1.f);
+
+namespace imgui {
+    bool ESP = false;
+    bool Boxes = false;
+    bool HideBot = false;
+    bool Health = false;
+    bool Line = false;
+    bool Name = false;
+    bool TeamID = false;
+    bool Distance = false;
+    bool EnemyCount = false;
+    bool Weapon = false;
+    bool Bone = false;
+    bool GameInfo = false;
+    bool Alert360 = false;
+    bool EnemyAiming = false;
+    bool Items = false;
+    bool Lootbox = false;
+    bool Vehicle = false;
+}
+
+namespace Settings {
+    int Tab = 0;
+    bool isVisibilityCheck = true;
+    namespace SettingsTab {
+        bool BypassMode = false;
+    }
+    namespace Aimbot {
+        bool Tick = false;
+        int AimMethod = 0;
+        std::atomic<int> TriggerMode{0};
+        bool MemoryAimbot = false;
+        bool SilentAim = false;
+        namespace SilentAimSettings {
+            bool AimKnocked = false;
+            bool Highprecisiontracking = false;
+            int Aimpositon = 0;
+            bool Prediction = false;
+            bool EnableFov = false;
+            bool BypassFOVLimit = false;
+            bool AimingLine = false;
+            float MaxStepDeg = 2.f;
+            int LegitTrackSwitchrate = 0;
+        }
+    }
+}
+
 static bool IsValidDarkIOSKeyFormat(NSString* key) {
     if (![key isKindOfClass:[NSString class]] || key.length < 10) return NO;
     if (![key hasPrefix:@"DARKIOS-"]) return NO;
@@ -417,6 +546,7 @@ namespace MenuLocale {
             if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
         return result;
     }
+
     static const char* tr(const char* value) {
         if (!value) return "";
         if (language == 0) return value;
