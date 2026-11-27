@@ -247,7 +247,7 @@ namespace imgui {
 }
 
 namespace Settings {
-    int Tab = 0;
+    // int Tab = 0;
     bool isVisibilityCheck = true;
     namespace SettingsTab {
         bool BypassMode = false;
