@@ -10,21 +10,30 @@
 #include <map>
 #include <algorithm>
 
-#include "PUBG/core/imgui/imgui.h"
-#include "PUBG/core/imgui/imgui_impl_metal.h"
-#include "gui/mywings/gui.hpp"
-#include "gui/trash/hashes.hpp"
-#include "gui/blur/blur.hpp"
-#include "gui/trash/bytes.hpp"
+#include "imgui.h"
+#include "imgui_impl_metal.h"
+#include "font_awesome_5.h"
+#include "fa_solid_900.h"
 
-#define STR(str) ENCRYPT(str)
+#ifndef STR
+#define STR(str) (str)
+#endif
 
 using namespace ImGui;
 
 static bool menu_open = false;
-static bool ui_initialized = false;
+static float g_menu_anim = 0.0f;
 
-// UI-only settings. These values do not invoke game functions.
+@interface ImGuiDrawView : UIViewController <MTKViewDelegate>
+@property (nonatomic, strong) id<MTLDevice> device;
+@property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
+@property (nonatomic, strong) MTKView *mtkView;
++ (void)showChange:(BOOL)open;
++ (BOOL)isMenuShowing;
+@end
+
+static ImGuiDrawView *g_SilenticumDrawView = nil;
+
 namespace SilenticumUI {
 
     struct AimSettings {
@@ -162,6 +171,61 @@ namespace SilenticumUI {
         lootEsp.weapons = [d boolForKey:@"ui_lw"];
         lootEsp.attachments = [d boolForKey:@"ui_la"];
     }
+
+    static bool TabButton(const char *icon, const char *label, bool active) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s  %s", icon, label);
+        ImVec4 col = active
+            ? ImVec4(0.47f, 0.47f, 1.0f, 0.35f)
+            : ImVec4(0.12f, 0.12f, 0.16f, 0.40f);
+        ImGui::PushStyleColor(ImGuiCol_Button, col);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.47f, 0.47f, 1.0f, 0.25f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.47f, 0.47f, 1.0f, 0.45f));
+        bool pressed = ImGui::Button(buf, ImVec2(-1, 28));
+        ImGui::PopStyleColor(3);
+        return pressed;
+    }
+
+    static void BeginGroupBox(const char *name, ImVec2 size) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.08f, 0.08f, 0.11f, 0.85f));
+        ImGui::BeginChild(name, size, true);
+        ImGui::TextColored(ImVec4(0.75f, 0.78f, 0.90f, 1.0f), "%s", name);
+        ImGui::Separator();
+    }
+
+    static void EndGroupBox() {
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
+    }
+
+    static UIWindow *KeyWindow() {
+        for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                for (UIWindow *win in scene.windows) {
+                    if (win.isKeyWindow) return win;
+                }
+                return scene.windows.firstObject;
+            }
+        }
+        return [UIApplication sharedApplication].windows.firstObject;
+    }
+
+    static void AttachOverlayView() {
+        if (!g_SilenticumDrawView) {
+            g_SilenticumDrawView = [[ImGuiDrawView alloc] init];
+        }
+        UIWindow *win = KeyWindow();
+        if (!win) return;
+        UIView *targetView = g_SilenticumDrawView.view;
+        if (targetView.superview != win) {
+            [targetView removeFromSuperview];
+            targetView.frame = win.bounds;
+            targetView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            [win addSubview:targetView];
+        }
+        [win bringSubviewToFront:targetView];
+        [targetView setUserInteractionEnabled:menu_open];
+    }
 }
 
 @implementation ImGuiDrawView
@@ -172,6 +236,11 @@ namespace SilenticumUI {
 
 + (void)showChange:(BOOL)open {
     menu_open = open;
+    if (open) {
+        SilenticumUI::AttachOverlayView();
+    } else if (g_SilenticumDrawView) {
+        [g_SilenticumDrawView.view setUserInteractionEnabled:NO];
+    }
 }
 
 + (BOOL)isMenuShowing {
@@ -190,11 +259,8 @@ namespace SilenticumUI {
 
         ImGuiIO &io = ImGui::GetIO();
 
-        io.Fonts->AddFontFromMemoryTTF(
-            museo500_binary,
-            sizeof(museo500_binary),
-            14
-        );
+        NSString *fontPath = @"/System/Library/Fonts/Core/AvenirNext.ttc";
+        io.Fonts->AddFontFromFileTTF(fontPath.UTF8String, 14.0f);
 
         static const ImWchar icon_ranges[] = {
             ICON_MIN_FA,
@@ -207,17 +273,11 @@ namespace SilenticumUI {
         icons_config.PixelSnapH = true;
 
         io.Fonts->AddFontFromMemoryTTF(
-            &font_awesome_binary,
-            sizeof(font_awesome_binary),
-            13,
+            (void *)fa_solid_900,
+            sizeof(fa_solid_900),
+            13.0f,
             &icons_config,
             icon_ranges
-        );
-
-        io.Fonts->AddFontFromMemoryTTF(
-            museo900_binary,
-            sizeof(museo900_binary),
-            28
         );
 
         ImGui::StyleColorsDark();
@@ -295,7 +355,6 @@ namespace SilenticumUI {
     [self updateIOWithTouchEvent:event];
 }
 
-// UI-only helper.
 static void DrawGroupTitle(const char *title) {
     ImGui::PushStyleColor(
         ImGuiCol_Text,
@@ -366,13 +425,12 @@ static void DrawGroupTitle(const char *title) {
                 ImVec2 pos = window->Pos;
                 ImVec2 size = ImVec2(690, 500);
 
-                gui.m_anim = ImLerp(
-                    gui.m_anim,
+                g_menu_anim = ImLerp(
+                    g_menu_anim,
                     1.0f,
                     0.045f
                 );
 
-                // Double-drawn title.
                 const char *title = "SILENTICUM";
 
                 ImVec2 titleSize =
@@ -400,7 +458,6 @@ static void DrawGroupTitle(const char *title) {
                     title
                 );
 
-                // Footer.
                 draw->AddLine(
                     pos + ImVec2(0, size.y - 50),
                     pos + ImVec2(170, size.y - 50),
@@ -428,7 +485,6 @@ static void DrawGroupTitle(const char *title) {
                     "mywings"
                 );
 
-                // Sidebar.
                 ImGui::SetCursorPos(ImVec2(10, 70));
 
                 ImGui::BeginChild(
@@ -439,23 +495,9 @@ static void DrawGroupTitle(const char *title) {
 
                 DrawGroupTitle("Aimbot");
 
-                if (gui.tab(
-                    ICON_FA_CROSSHAIRS,
-                    "Aim Bot",
-                    selectedTab == 0
-                )) selectedTab = 0;
-
-                if (gui.tab(
-                    ICON_FA_GHOST,
-                    "Advanced",
-                    selectedTab == 1
-                )) selectedTab = 1;
-
-                if (gui.tab(
-                    ICON_FA_MOUSE,
-                    "Legit Bot",
-                    selectedTab == 2
-                )) selectedTab = 2;
+                if (TabButton(ICON_FA_CROSSHAIRS, "Aim Bot", selectedTab == 0)) selectedTab = 0;
+                if (TabButton(ICON_FA_GHOST, "Advanced", selectedTab == 1)) selectedTab = 1;
+                if (TabButton(ICON_FA_MOUSE_POINTER, "Legit Bot", selectedTab == 2)) selectedTab = 2;
 
                 ImGui::Spacing();
                 ImGui::Spacing();
@@ -463,17 +505,8 @@ static void DrawGroupTitle(const char *title) {
 
                 DrawGroupTitle("Visuals");
 
-                if (gui.tab(
-                    ICON_FA_USER,
-                    "Players",
-                    selectedTab == 3
-                )) selectedTab = 3;
-
-                if (gui.tab(
-                    ICON_FA_PALLET,
-                    "World",
-                    selectedTab == 4
-                )) selectedTab = 4;
+                if (TabButton(ICON_FA_USER, "Players", selectedTab == 3)) selectedTab = 3;
+                if (TabButton(ICON_FA_PALLET, "World", selectedTab == 4)) selectedTab = 4;
 
                 ImGui::Spacing();
                 ImGui::Spacing();
@@ -481,21 +514,11 @@ static void DrawGroupTitle(const char *title) {
 
                 DrawGroupTitle("Miscellaneous");
 
-                if (gui.tab(
-                    ICON_FA_HAMMER,
-                    "Main",
-                    selectedTab == 5
-                )) selectedTab = 5;
-
-                if (gui.tab(
-                    ICON_FA_CODE,
-                    "Scripts",
-                    selectedTab == 6
-                )) selectedTab = 6;
+                if (TabButton(ICON_FA_HAMMER, "Main", selectedTab == 5)) selectedTab = 5;
+                if (TabButton(ICON_FA_CODE, "Scripts", selectedTab == 6)) selectedTab = 6;
 
                 ImGui::EndChild();
 
-                // Save button.
                 ImGui::SetCursorPos(ImVec2(190, 20));
 
                 if (ImGui::Button(
@@ -505,28 +528,13 @@ static void DrawGroupTitle(const char *title) {
                     SaveSettings();
                 }
 
-                // Search and settings.
                 ImGui::SetCursorPos(ImVec2(620, 20));
 
-                ImGui::PushStyleColor(
-                    ImGuiCol_Button,
-                    ImVec4(0, 0, 0, 0)
-                );
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0, 0, 0, 0));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0, 0, 0, 0));
 
-                ImGui::PushStyleColor(
-                    ImGuiCol_ButtonHovered,
-                    ImVec4(0, 0, 0, 0)
-                );
-
-                ImGui::PushStyleColor(
-                    ImGuiCol_ButtonActive,
-                    ImVec4(0, 0, 0, 0)
-                );
-
-                if (ImGui::Button(
-                    ICON_FA_SEARCH,
-                    ImVec2(25, 25)
-                )) {
+                if (ImGui::Button(ICON_FA_SEARCH, ImVec2(25, 25))) {
                     showSearch = !showSearch;
                 }
 
@@ -534,23 +542,19 @@ static void DrawGroupTitle(const char *title) {
 
                 ImGui::SetCursorPos(ImVec2(650, 20));
 
-                if (ImGui::Button(
-                    ICON_FA_COG,
-                    ImVec2(25, 25)
-                )) {
+                if (ImGui::Button(ICON_FA_COG, ImVec2(25, 25))) {
                     showSettings = !showSettings;
                 }
 
                 ImGui::PopStyleColor(3);
 
-                // Main content.
                 ImGui::PushStyleVar(
                     ImGuiStyleVar_ItemSpacing,
                     ImVec2(8, 8)
                 );
 
                 ImGui::SetCursorPos(
-                    ImVec2(185, 81 - (5 * gui.m_anim))
+                    ImVec2(185, 81 - (5 * g_menu_anim))
                 );
 
                 float childHeight = size.y - 110;
@@ -573,16 +577,16 @@ static void DrawGroupTitle(const char *title) {
                 switch (selectedTab) {
 
                     case 0:
-                        gui.group_box("Aim Bot", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Aim Bot", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("enable aimbot", &aim.enabled);
                         ImGui::Checkbox("show fov", &aim.show_fov);
                         ImGui::SliderFloat("fov size", &aim.fov_size, 0, 500, "%.0f");
                         ImGui::SliderFloat("distance", &aim.max_distance, 0, 400, "%.0f");
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Smooth", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Smooth", ImVec2(groupWidth, halfHeight));
                         ImGui::SliderFloat("smooth", &aim.smooth, 1, 10, "%.1f");
                         ImGui::Checkbox("prediction", &aim.prediction);
 
@@ -594,9 +598,9 @@ static void DrawGroupTitle(const char *title) {
                             ImGui::Combo("bone", &aim.target_bone, bones, 4);
                         }
 
-                        gui.end_group_box();
+                        EndGroupBox();
 
-                        gui.group_box("Trigger", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Trigger", ImVec2(groupWidth, halfHeight));
 
                         {
                             const char *modes[] = {
@@ -611,46 +615,46 @@ static void DrawGroupTitle(const char *title) {
                             );
                         }
 
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Silent", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Silent", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("enable silent", &aim.silent);
                         ImGui::Checkbox("show silent fov", &aim.silent_show_fov);
                         ImGui::SliderFloat("fov", &aim.silent_fov, 0, 500, "%.0f");
                         ImGui::SliderFloat("distance", &aim.silent_distance, 0, 400, "%.0f");
                         ImGui::Checkbox("visible check", &aim.silent_vis_check);
-                        gui.end_group_box();
+                        EndGroupBox();
                         break;
 
                     case 1:
-                        gui.group_box("Protection", ImVec2(groupWidth, smallHeight));
+                        BeginGroupBox("Protection", ImVec2(groupWidth, smallHeight));
                         ImGui::Checkbox("grenade warning", &aim.grenade_warning);
                         ImGui::Checkbox("vehicle aim", &aim.vehicle_aim);
                         ImGui::Checkbox("closest priority", &aim.closest_priority);
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Colors", ImVec2(groupWidth, smallHeight));
+                        BeginGroupBox("Colors", ImVec2(groupWidth, smallHeight));
                         ImGui::ColorEdit4("box", vis.box_color);
                         ImGui::ColorEdit4("skel", vis.skeleton_color);
                         ImGui::ColorEdit4("line", vis.snapline_color);
                         ImGui::ColorEdit4("ind", vis.indicator_color);
                         ImGui::ColorEdit4("silent", vis.silent_color);
-                        gui.end_group_box();
+                        EndGroupBox();
                         break;
 
                     case 2:
-                        gui.group_box("Legit Bot", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Legit Bot", ImVec2(groupWidth, halfHeight));
                         ImGui::SliderFloat("aim smooth", &aim.smooth, 1, 10, "%.1f");
                         ImGui::SliderFloat("aim fov", &aim.fov_size, 0, 500, "%.0f");
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Settings", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Settings", ImVec2(groupWidth, halfHeight));
 
                         {
                             const char *bones[] = {
@@ -660,22 +664,22 @@ static void DrawGroupTitle(const char *title) {
                             ImGui::Combo("aim bone", &aim.target_bone, bones, 4);
                         }
 
-                        gui.end_group_box();
+                        EndGroupBox();
                         break;
 
                     case 3:
-                        gui.group_box("Player ESP", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Player ESP", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("box", &vis.boxes);
                         ImGui::Checkbox("health", &vis.health);
                         ImGui::Checkbox("skeleton", &vis.skeleton);
                         ImGui::Checkbox("name", &vis.names);
                         ImGui::Checkbox("distance", &vis.distance);
                         ImGui::Checkbox("snapline", &vis.snapline);
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Indicators", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Indicators", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("indicators", &vis.indicators);
 
                         if (vis.indicators) {
@@ -685,59 +689,59 @@ static void DrawGroupTitle(const char *title) {
                             ImGui::SliderFloat("dist", &vis.indicator_distance, 50, 400, "%.0f");
                         }
 
-                        gui.end_group_box();
+                        EndGroupBox();
 
-                        gui.group_box("Other ESP", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Other ESP", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("self skeleton", &vis.self_skeleton);
                         ImGui::Checkbox("draw bots", &vis.draw_bots);
-                        gui.end_group_box();
+                        EndGroupBox();
                         break;
 
                     case 4:
-                        gui.group_box("Vehicles", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Vehicles", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("vehicles", &itemEsp.vehicles);
                         ImGui::Checkbox("loot boxes", &itemEsp.metro_chests);
                         ImGui::SliderFloat("max distance", &itemEsp.max_distance, 50, 300, "%.0f");
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Loot", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Loot", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("enable loot", &lootEsp.enabled);
                         ImGui::Checkbox("weapons", &lootEsp.weapons);
                         ImGui::Checkbox("attachments", &lootEsp.attachments);
                         ImGui::Checkbox("scopes", &lootEsp.scopes);
-                        gui.end_group_box();
+                        EndGroupBox();
 
-                        gui.group_box("Items", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Items", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("ammo", &lootEsp.ammo);
                         ImGui::Checkbox("meds", &lootEsp.health);
                         ImGui::Checkbox("backpacks", &lootEsp.backpacks);
                         ImGui::Checkbox("helmets", &lootEsp.helmets);
                         ImGui::Checkbox("vests", &lootEsp.vests);
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Metro", ImVec2(groupWidth, halfHeight));
+                        BeginGroupBox("Metro", ImVec2(groupWidth, halfHeight));
                         ImGui::Checkbox("metro items", &lootEsp.metro_items);
                         ImGui::Checkbox("rare only", &lootEsp.rare_only);
                         ImGui::SliderFloat("loot distance", &lootEsp.max_distance, 50, 200, "%.0f");
-                        gui.end_group_box();
+                        EndGroupBox();
                         break;
 
                     case 5:
-                        gui.group_box("Main", ImVec2(groupWidth, fullHeight));
-                        gui.end_group_box();
+                        BeginGroupBox("Main", ImVec2(groupWidth, fullHeight));
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Info", ImVec2(groupWidth, fullHeight));
-                        gui.end_group_box();
+                        BeginGroupBox("Info", ImVec2(groupWidth, fullHeight));
+                        EndGroupBox();
                         break;
 
                     case 6:
-                        gui.group_box("Scripts", ImVec2(groupWidth, fullHeight));
+                        BeginGroupBox("Scripts", ImVec2(groupWidth, fullHeight));
 
                         if (ImGui::Button(
                             "reset guest",
@@ -765,12 +769,12 @@ static void DrawGroupTitle(const char *title) {
                             ImGui::EndPopup();
                         }
 
-                        gui.end_group_box();
+                        EndGroupBox();
 
                         ImGui::SameLine();
 
-                        gui.group_box("Config", ImVec2(groupWidth, fullHeight));
-                        gui.end_group_box();
+                        BeginGroupBox("Config", ImVec2(groupWidth, fullHeight));
+                        EndGroupBox();
                         break;
                 }
 
@@ -810,3 +814,18 @@ drawableSizeWillChange:(CGSize)size {
 }
 
 @end
+
+extern "C" void OpenNewMenu(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [ImGuiDrawView showChange:![ImGuiDrawView isMenuShowing]];
+    });
+}
+
+extern "C" void RenderNewMenuOverlay(void) {
+    if (![ImGuiDrawView isMenuShowing]) {
+        return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SilenticumUI::AttachOverlayView();
+    });
+}
