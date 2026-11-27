@@ -28,17 +28,100 @@
 // #include "gui/blur/blur.hpp"
 // #include "gui/trash/bytes.hpp"
 
+#ifndef ENCRYPT
+#define ENCRYPT(str) (str)
+#endif
+
 #define STR(str) ENCRYPT(str)
 using namespace ImGui;
 using namespace SDK;
 #define ALPHA (ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_AlphaBar|ImGuiColorEditFlags_InputRGB|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoBorder)
 #define NO_ALPHA (ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_InputRGB|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoBorder)
 
+struct AimSettings {
+    bool enabled = false;
+    bool silent = false;
+    bool show_fov = false;
+    bool silent_show_fov = false;
+    bool prediction = false;
+    bool vis_check = false;
+    bool silent_vis_check = false;
+    bool grenade_warning = false;
+    bool vehicle_aim = false;
+    bool closest_priority = false;
+    float fov_size = 120.f;
+    float max_distance = 300.f;
+    float silent_distance = 300.f;
+    float smooth = 2.5f;
+    float silent_smooth = 1.0f;
+    float silent_fov = 90.f;
+    int target_bone = 0;
+    int trigger_mode = 0;
+    int silent_bone = 0;
+};
+
+struct VisSettings {
+    bool boxes = false;
+    bool health = false;
+    bool skeleton = false;
+    bool names = false;
+    bool distance = false;
+    bool snapline = false;
+    bool indicators = false;
+    bool indicator_fill = false;
+    bool self_skeleton = false;
+    bool draw_bots = false;
+    float indicator_size = 20.f;
+    float indicator_width = 50.f;
+    float indicator_distance = 180.f;
+    float line_width = 1.5f;
+    float box_color[4] = {1.f, 1.f, 1.f, 1.f};
+    float skeleton_color[4] = {1.f, 1.f, 1.f, 1.f};
+    float snapline_color[4] = {1.f, 1.f, 1.f, 1.f};
+    float indicator_color[4] = {1.f, 1.f, 1.f, 1.f};
+    float silent_color[4] = {1.f, 0.f, 0.f, 1.f};
+};
+
+struct ItemEspSettings {
+    bool vehicles = false;
+    bool metro_chests = false;
+    bool snow = false;
+    float max_distance = 200.f;
+};
+
+struct LootEspSettings {
+    bool enabled = false;
+    bool weapons = false;
+    bool attachments = false;
+    bool scopes = false;
+    bool ammo = false;
+    bool health = false;
+    bool backpacks = false;
+    bool helmets = false;
+    bool vests = false;
+    bool metro_items = false;
+    bool rare_only = false;
+    float max_distance = 150.f;
+};
+
+static AimSettings aim;
+static VisSettings vis;
+static ItemEspSettings itemEsp;
+static LootEspSettings lootEsp;
+
 ASTExtraPlayerCharacter* g_LocalPlayer = nullptr;
 ASTExtraPlayerController* g_PlayerController = nullptr;
 UFont* tslFont = nullptr;
 int enemyCount = 0;
 bool menu_open = false;
+
+@interface ImGuiDrawView : UIViewController <MTKViewDelegate>
+@property (nonatomic, strong) id<MTLDevice> device;
+@property (nonatomic, strong) id<MTLCommandQueue> commandQueue;
+@property (nonatomic, strong) MTKView *mtkView;
++ (void)showChange:(BOOL)o;
++ (BOOL)isMenuShowing;
+@end
 
 static ImGuiDrawView *g_ImGuiDrawView = nil;
 static UIWindow *g_ImGuiWindow = nil;
