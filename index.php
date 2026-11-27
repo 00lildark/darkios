@@ -119,23 +119,26 @@ function darkiosGeoLookup(string $ip): array {
     return ['location' => 'Unknown', 'isp' => 'Unknown', 'asn' => 'Unknown', 'vpnActive' => 'Unknown'];
 }
 
-function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedIds, string $uniqueField = 'key'): array {
+function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedIds, string $uniqueField = 'key', array $bannedKeys = []): array {
     $deletedMap = array_flip($deletedIds);
+    $bannedMap = array_flip(array_map(fn($k) => strtolower((string)$k), $bannedKeys));
     $map = [];
 
     foreach ($current as $item) {
         if (!is_array($item)) continue;
-        $id = $item['id'] ?? '';
-        $uk = $item[$uniqueField] ?? $id;
+        $id = (string)($item['id'] ?? '');
+        $uk = (string)($item[$uniqueField] ?? $id);
         if ($id !== '' && isset($deletedMap[$id])) continue;
+        if ($uniqueField === 'key' && $uk !== '' && isset($bannedMap[strtolower($uk)])) continue;
         if ($uk !== '') $map[$uk] = $item;
     }
 
     foreach ($incoming as $item) {
         if (!is_array($item)) continue;
-        $id = $item['id'] ?? '';
-        $uk = $item[$uniqueField] ?? $id;
+        $id = (string)($item['id'] ?? '');
+        $uk = (string)($item[$uniqueField] ?? $id);
         if ($id !== '' && isset($deletedMap[$id])) continue;
+        if ($uniqueField === 'key' && $uk !== '' && isset($bannedMap[strtolower($uk)])) continue;
         if ($uk === '') continue;
 
         if (isset($map[$uk])) {
@@ -158,7 +161,6 @@ function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedId
     return $result;
 }
 
-// Dylib / iOS doğrulama ve gerçek cihaz bilgisi kaydı (?verify=1)
 if (isset($_GET['verify'])) {
     $rawBody = (string)file_get_contents('php://input');
     $input = json_decode($rawBody, true);
@@ -183,13 +185,13 @@ if (isset($_GET['verify'])) {
     foreach ($store['banned'] as $b) {
         if (strcasecmp((string)($b['key'] ?? ''), $keyInput) === 0) {
             if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-            darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Bu key banlanıb']);
+            darkiosJsonOut(['status' => 'error', 'valid' => false, 'banned' => true, 'message' => 'Bu key banlanıb']);
         }
     }
 
     if (!empty($store['updateModeOn'])) {
         if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'UPDATE aktivdir']);
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'updating' => true, 'message' => 'UPDATE aktivdir']);
     }
 
     $foundIdx = -1;
@@ -209,15 +211,23 @@ if (isset($_GET['verify'])) {
     $nowMs = (int)round(microtime(true) * 1000);
 
     if (($rec['status'] ?? '') === 'Paused') {
-        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key dayandırılıb']);
+        if (($rec['pauseType'] ?? '') === 'temp' && !empty($rec['pauseUntil']) && (int)$rec['pauseUntil'] <= $nowMs) {
+            $rec['status'] = 'Active';
+            $rec['pauseType'] = null;
+            $rec['pauseUntil'] = null;
+            $rec['modifiedAt'] = $nowMs;
+        } else {
+            if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+            darkiosJsonOut(['status' => 'error', 'valid' => false, 'paused' => true, 'message' => 'Key dayandırılıb']);
+        }
     }
 
     if (empty($rec['startedAt'])) {
         $rec['startedAt'] = $nowMs;
     }
 
-    if (!empty($rec['durationMs']) && ($rec['startedAt'] + (int)$rec['durationMs']) <= $nowMs) {
+    $durationMs = isset($rec['durationMs']) && $rec['durationMs'] !== null && $rec['durationMs'] !== '' ? (int)$rec['durationMs'] : 0;
+    if ($durationMs > 0 && ((int)$rec['startedAt'] + $durationMs) <= $nowMs) {
         $rec['status'] = 'Expired';
         $rec['modifiedAt'] = $nowMs;
         $store['records'][$foundIdx] = $rec;
@@ -298,14 +308,19 @@ if (isset($_GET['verify'])) {
     darkiosWriteStore($dataFile, $backupDir, $store);
     if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
 
+    $isLifetime = ($durationMs <= 0);
+    $expireEpoch = $isLifetime ? 0 : (int)floor(((int)$rec['startedAt'] + $durationMs) / 1000);
+
     darkiosJsonOut([
         'status' => 'ok',
         'valid' => true,
         'message' => 'Verified',
         'key' => $rec['key'],
         'type' => $rec['type'] ?? 'NORMAL',
+        'lifetime' => $isLifetime,
+        'expire_epoch' => $expireEpoch,
         'startedAt' => $rec['startedAt'],
-        'durationMs' => $rec['durationMs']
+        'durationMs' => $durationMs
     ]);
 }
 
@@ -328,21 +343,27 @@ if (isset($_GET['sync'])) {
         if ($action === 'delete_key' && !empty($payload['id'])) {
             $delId = (string)$payload['id'];
             if (!in_array($delId, $deletedIds, true)) $deletedIds[] = $delId;
-            $current['records'] = array_values(array_filter($current['records'], fn($r) => ($r['id'] ?? '') !== $delId));
-            $current['devices'] = array_values(array_filter($current['devices'], fn($d) => ($d['keyId'] ?? '') !== $delId));
+            $current['records'] = array_values(array_filter($current['records'], fn($r) => (string)($r['id'] ?? '') !== $delId));
+            $current['devices'] = array_values(array_filter($current['devices'], fn($d) => (string)($d['keyId'] ?? '') !== $delId));
         } elseif ($action === 'ban_key') {
             $banObj = is_array($payload['banEntry'] ?? null) ? $payload['banEntry'] : null;
             $delId = (string)($payload['id'] ?? '');
             $banKeyVal = (string)($banObj['key'] ?? ($payload['key'] ?? ''));
             if ($delId !== '' && !in_array($delId, $deletedIds, true)) $deletedIds[] = $delId;
+            foreach ($current['records'] as $r) {
+                if (!empty($r['id']) && (($banKeyVal !== '' && strcasecmp((string)($r['key'] ?? ''), $banKeyVal) === 0) || (string)$r['id'] === $delId)) {
+                    $rid = (string)$r['id'];
+                    if (!in_array($rid, $deletedIds, true)) $deletedIds[] = $rid;
+                }
+            }
             if ($banKeyVal !== '') {
-                $current['records'] = array_values(array_filter($current['records'], fn($r) => ($r['key'] ?? '') !== $banKeyVal && ($r['id'] ?? '') !== $delId));
+                $current['records'] = array_values(array_filter($current['records'], fn($r) => strcasecmp((string)($r['key'] ?? ''), $banKeyVal) !== 0 && (string)($r['id'] ?? '') !== $delId));
                 if ($banObj) array_unshift($current['banned'], $banObj);
             }
         } elseif ($action === 'unban_key' && !empty($payload['id'])) {
             $unbanId = (string)$payload['id'];
             if (!in_array($unbanId, $deletedIds, true)) $deletedIds[] = $unbanId;
-            $current['banned'] = array_values(array_filter($current['banned'], fn($b) => ($b['id'] ?? '') !== $unbanId));
+            $current['banned'] = array_values(array_filter($current['banned'], fn($b) => (string)($b['id'] ?? '') !== $unbanId));
         } elseif ($action === 'clear_all_manual' && !empty($payload['confirmClearAll'])) {
             foreach ($current['records'] as $r) {
                 if (!empty($r['id'])) $deletedIds[] = (string)$r['id'];
@@ -357,10 +378,12 @@ if (isset($_GET['sync'])) {
         $incomingBanned = is_array($payload['banned'] ?? null) ? $payload['banned'] : [];
         $incomingDevices = is_array($payload['devices'] ?? null) ? $payload['devices'] : [];
 
+        $mergedBanned = darkiosMergeByKeyOrId($current['banned'], $incomingBanned, $deletedIds, 'key');
+        $bannedKeys = array_values(array_filter(array_map(fn($b) => (string)($b['key'] ?? ''), $mergedBanned)));
+
         $mergedRecords = ($action === 'clear_all_manual')
             ? []
-            : darkiosMergeByKeyOrId($current['records'], $incomingRecords, $deletedIds, 'key');
-        $mergedBanned = darkiosMergeByKeyOrId($current['banned'], $incomingBanned, $deletedIds, 'key');
+            : darkiosMergeByKeyOrId($current['records'], $incomingRecords, $deletedIds, 'key', $bannedKeys);
         $mergedDevices = ($action === 'clear_all_manual')
             ? []
             : darkiosMergeByKeyOrId($current['devices'], $incomingDevices, $deletedIds, 'id');
@@ -455,7 +478,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   outline:2px solid var(--red);outline-offset:2px
 }
 
-/* ---------- Shell / Rail ---------- */
 .shell{display:flex;min-height:100vh;position:relative;z-index:1}
 .rail{
   width:64px;flex:0 0 64px;position:fixed;inset:0 auto 0 0;z-index:8;
@@ -479,7 +501,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   box-shadow:0 0 12px var(--red);
 }
 
-/* ---------- Main / Topbar ---------- */
 .main{margin-left:64px;min-width:0;width:calc(100% - 64px)}
 .topbar{
   height:60px;position:sticky;top:0;z-index:5;padding:0 24px;
@@ -501,7 +522,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .top-select option,.filters select option,.field select option{background:var(--panel-solid);color:var(--text)}
 .content{padding:30px 24px 48px;max-width:1560px;margin:auto}
 
-/* ---------- Heading / Buttons ---------- */
 .heading{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;margin:0 0 24px;flex-wrap:wrap}
 .heading h1{font-size:26px;margin:0 0 6px;font-weight:800;letter-spacing:-.6px}
 .heading p{margin:0;color:var(--muted);font-size:12px;font-weight:500;max-width:70ch}
@@ -526,7 +546,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .secondary.danger{border-color:var(--red-border);color:var(--red);background:var(--red-soft)}
 .secondary.danger:hover{background:rgba(255,61,87,.22)}
 
-/* ---------- Metrics ---------- */
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}
 .metric{
   position:relative;overflow:hidden;padding:18px 20px;border-radius:var(--radius);
@@ -545,7 +564,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .metric.accent strong{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
 .metric:nth-child(2) strong{color:var(--green)}
 
-/* ---------- Table panel ---------- */
 .table-panel{
   border-radius:var(--radius);overflow:hidden;background:var(--panel);border:1px solid var(--line);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 24px 60px -30px rgba(0,0,0,.8);
@@ -600,12 +618,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .dots:hover{border-color:var(--red-border);background:var(--red-soft);transform:rotate(90deg)}
 .blank{padding:60px 16px!important;text-align:center;color:var(--muted);font-size:12.5px;font-weight:500;white-space:normal!important}
 
-/* ---------- Views ---------- */
 .view{display:none}
 .view.active{display:block;animation:viewIn .35s var(--ease)}
 @keyframes viewIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 
-/* ---------- Modal ---------- */
 .modal-bg{
   position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;padding:16px;
   background:rgba(3,3,6,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
@@ -652,7 +668,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px;flex-wrap:wrap}
 .footnote{margin:12px 0 0;color:var(--muted);font-size:11px;font-weight:500;line-height:1.55}
 
-/* ---------- Toast ---------- */
 .toast{
   position:fixed;right:22px;bottom:22px;z-index:40;display:none;padding:12px 18px;border-radius:12px;
   background:rgba(244,244,248,.96);color:#09090d;font-size:12px;font-weight:700;
@@ -661,7 +676,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .toast.show{display:block;animation:toastIn .3s var(--ease)}
 @keyframes toastIn{from{opacity:0;transform:translateY(14px) scale(.96)}}
 
-/* ---------- Settings ---------- */
 .settings-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
 .setting-card{padding:20px;border-radius:var(--radius);background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);transition:border-color .25s,transform .25s var(--ease)}
 .setting-card:hover{border-color:var(--line-strong)}
@@ -677,7 +691,6 @@ input:checked + .slider:before{transform:translateX(24px)}
 .update-badge{display:inline-block;margin-top:14px;padding:6px 11px;border-radius:9px;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;color:var(--red);background:var(--red-soft);border:1px solid var(--red-border);animation:pulseBadge 2s ease-in-out infinite}
 @keyframes pulseBadge{50%{box-shadow:0 0 0 5px rgba(255,61,87,.1)}}
 
-/* ---------- Login ---------- */
 .login-screen{position:relative;z-index:1;min-height:100vh;display:grid;place-items:center;padding:20px}
 .login-card{
   width:min(400px,100%);padding:36px 32px;border-radius:22px;position:relative;overflow:hidden;
@@ -697,7 +710,6 @@ input:checked + .slider:before{transform:translateX(24px)}
 .login-submit{width:100%;height:46px;margin-top:12px;font-size:13px}
 .login-error{min-height:16px;margin-top:8px;color:var(--red);font-size:11.5px;font-weight:600}
 
-/* ---------- Responsive ---------- */
 @media(max-width:980px){
   .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
@@ -940,12 +952,16 @@ let isSyncingFromServer=false;
 (function hydrateFromLocalIfNeeded(){
   try{
     const localRecs=JSON.parse(localStorage.getItem('darkios_keys_v4')||'[]');
+    const deletedSet=new Set((Array.isArray(SERVER_INITIAL.deletedIds)?SERVER_INITIAL.deletedIds:[]).map(String));
+    const bannedSet=new Set(banned.map(b=>String(b.key||'').toLowerCase()));
     if(Array.isArray(localRecs)&&localRecs.length>0){
-      const existingKeys=new Set(records.map(r=>r.key));
+      const existingKeys=new Set(records.map(r=>String(r.key||'').toLowerCase()));
       let added=0;
       localRecs.forEach(lr=>{
-        if(lr&&lr.key&&!existingKeys.has(lr.key)){
+        const kLower=String(lr?.key||'').toLowerCase();
+        if(lr&&lr.key&&!deletedSet.has(String(lr.id||''))&&!bannedSet.has(kLower)&&!existingKeys.has(kLower)){
           records.push(lr);
+          existingKeys.add(kLower);
           added++;
         }
       });
@@ -1671,10 +1687,10 @@ function importTxt(file){
     persist('merge');renderAll();notify(`+${added}`);
   };reader.readAsText(file);
 }
-function backupJson(){download('darkios-backup.json',JSON.stringify({records,banned,updateModeOn},null,2),'application/json')}
+function backupJson(){download('darkios-backup.json',JSON.stringify({records,banned,devices:deviceSessions,updateModeOn},null,2),'application/json')}
 function restoreJson(file){
   if(!file)return;const r=new FileReader();
-  r.onload=()=>{try{const d=JSON.parse(r.result);records=d.records||[];banned=d.banned||[];updateModeOn=!!d.updateModeOn;persist('merge');renderAll();notify('Restored')}catch{notify('Invalid JSON')}};
+  r.onload=()=>{try{const d=JSON.parse(r.result);records=d.records||[];banned=d.banned||[];deviceSessions=d.devices||[];updateModeOn=!!d.updateModeOn;persist('merge');renderAll();notify('Restored')}catch{notify('Invalid JSON')}};
   r.readAsText(file);
 }
 function download(name,data,type){const a=document.createElement('a'),u=URL.createObjectURL(new Blob([data],{type}));a.href=u;a.download=name;a.click();URL.revokeObjectURL(u)}
