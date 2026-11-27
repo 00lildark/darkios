@@ -21,7 +21,7 @@ class ASTExtraPlayerController;
 class ASTExtraPlayerCharacter;
 }
 
-class HeeeNoScreenShotView;
+@class HeeeNoScreenShotView;
 
 inline float Z = 0.5f;
 inline std::atomic<float> aimDisplayWidth{0.f};
