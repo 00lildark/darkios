@@ -1,9 +1,11 @@
 // HMOOD__TG@i_8_f
 
-
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <sys/utsname.h>
+#import <ifaddrs.h>
+#import <arpa/inet.h>
+#import <SystemConfiguration/SystemConfiguration.h>
 #include <chrono>
 #include <atomic>
 #include <array>
@@ -35,9 +37,6 @@
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <mach/vm_statistics.h>
-
-// HMOOD__TG@i_8_f
-
 
 using namespace SDK;
 
@@ -137,10 +136,7 @@ extern "C" void RenderNewMenuOverlay(void);
 extern ImFont* mainFont;
 ImFont* mainFont = nullptr;
 
-// HMOOD__TG@i_8_f
-
-
-bool MenDeal;
+bool MenDeal = false;
 ImFont* cyberMenuFont = nullptr;
 
 bool IsLogin = false;
@@ -247,7 +243,6 @@ namespace imgui {
 }
 
 namespace Settings {
-    // int Tab = 0;
     bool isVisibilityCheck = true;
     namespace SettingsTab {
         bool BypassMode = false;
@@ -272,6 +267,15 @@ namespace Settings {
     }
 }
 
+// ============================================================================
+// DARKIOS SERVER VERIFICATION + REAL DEVICE TELEMETRY + POST-LOGIN MENU BUTTON
+// ============================================================================
+
+static NSString *const kDarkIOSVerifyEndpoint = @"https://darkios.onrender.com/index.php?verify=1";
+static const NSInteger kDarkIOSFloatingBtnTag = 98421;
+static bool g_DarkIOSServerVerified = false;
+static bool g_DarkIOSNewMenuOpen = false;
+
 static bool IsValidDarkIOSKeyFormat(NSString* key) {
     if (![key isKindOfClass:[NSString class]] || key.length < 10) return NO;
     if (![key hasPrefix:@"DARKIOS-"]) return NO;
@@ -280,15 +284,261 @@ static bool IsValidDarkIOSKeyFormat(NSString* key) {
 }
 
 static bool IsESPKeyVerifiedMenu() {
+    if (g_DarkIOSServerVerified || IsLogin) return true;
     NSUserDefaults* defs = [NSUserDefaults standardUserDefaults];
-    if ([defs boolForKey:@"ESP_Key_Verified_v1"] || [defs boolForKey:@"DARKIOS_Key_Verified_v1"]) {
-        return true;
-    }
-    NSString* savedKey = [defs stringForKey:@"DARKIOS_Saved_Key_v1"];
-    return IsValidDarkIOSKeyFormat(savedKey);
+    return [defs boolForKey:@"ESP_Key_Verified_v1"] || [defs boolForKey:@"DARKIOS_Key_Verified_v1"];
 }
 
-// HMOOD__TG@i_8_f
+static NSString *DarkIOS_MachineID(void) {
+    struct utsname sysInfo;
+    uname(&sysInfo);
+    return [NSString stringWithCString:sysInfo.machine encoding:NSUTF8StringEncoding] ?: @"Unknown";
+}
+
+static NSString *DarkIOS_ModelName(NSString *machine) {
+    NSDictionary *map = @{
+        @"iPhone17,1": @"iPhone 16 Pro",
+        @"iPhone17,2": @"iPhone 16 Pro Max",
+        @"iPhone17,3": @"iPhone 16",
+        @"iPhone17,4": @"iPhone 16 Plus",
+        @"iPhone16,1": @"iPhone 15 Pro",
+        @"iPhone16,2": @"iPhone 15 Pro Max",
+        @"iPhone15,4": @"iPhone 15",
+        @"iPhone15,5": @"iPhone 15 Plus",
+        @"iPhone15,2": @"iPhone 14 Pro",
+        @"iPhone15,3": @"iPhone 14 Pro Max",
+        @"iPhone14,2": @"iPhone 13 Pro",
+        @"iPhone14,3": @"iPhone 13 Pro Max",
+        @"iPhone14,5": @"iPhone 13"
+    };
+    return map[machine] ?: machine;
+}
+
+static NSString *DarkIOS_LocalIP(void) {
+    NSString *address = @"Unknown";
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) == 0) {
+        for (struct ifaddrs *addr = interfaces; addr != NULL; addr = addr->ifa_next) {
+            if (addr->ifa_addr && addr->ifa_addr->sa_family == AF_INET) {
+                NSString *name = [NSString stringWithUTF8String:addr->ifa_name];
+                if ([name isEqualToString:@"en0"] || [name isEqualToString:@"pdp_ip0"]) {
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)addr->ifa_addr)->sin_addr)];
+                    break;
+                }
+            }
+        }
+        freeifaddrs(interfaces);
+    }
+    return address;
+}
+
+static NSString *DarkIOS_NetworkType(void) {
+    SCNetworkReachabilityRef reach = SCNetworkReachabilityCreateWithName(NULL, "8.8.8.8");
+    SCNetworkReachabilityFlags flags = 0;
+    BOOL ok = reach && SCNetworkReachabilityGetFlags(reach, &flags);
+    if (reach) CFRelease(reach);
+    if (!ok || !(flags & kSCNetworkReachabilityFlagsReachable)) return @"Offline";
+    if (flags & kSCNetworkReachabilityFlagsIsWWAN) return @"Cellular (4G/5G)";
+    return @"Wi-Fi";
+}
+
+static NSDictionary *DarkIOS_CollectRealTelemetry(NSString *key) {
+    UIDevice *dev = [UIDevice currentDevice];
+    dev.batteryMonitoringEnabled = YES;
+
+    float bat = dev.batteryLevel;
+    NSString *batStr = (bat >= 0.f) ? [NSString stringWithFormat:@"%.0f%%", bat * 100.f] : @"Unknown";
+
+    NSString *batState = @"Unknown";
+    if (dev.batteryState == UIDeviceBatteryStateUnplugged) batState = @"Unplugged";
+    else if (dev.batteryState == UIDeviceBatteryStateCharging) batState = @"Charging";
+    else if (dev.batteryState == UIDeviceBatteryStateFull) batState = @"Full";
+
+    NSString *machine = DarkIOS_MachineID();
+    NSString *model = DarkIOS_ModelName(machine);
+    NSString *hwid = dev.identifierForVendor.UUIDString ?: @"Unknown";
+
+    NSProcessInfo *proc = [NSProcessInfo processInfo];
+    double totalRamGB = (double)proc.physicalMemory / (1024.0 * 1024.0 * 1024.0);
+
+    NSDictionary *fs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:NSHomeDirectory() error:nil];
+    double freeDiskGB = [fs[NSFileSystemFreeSize] doubleValue] / (1024.0 * 1024.0 * 1024.0);
+    double totalDiskGB = [fs[NSFileSystemSize] doubleValue] / (1024.0 * 1024.0 * 1024.0);
+
+    UIScreen *scr = [UIScreen mainScreen];
+    CGRect bounds = scr.nativeBounds;
+    NSString *jb = [[NSFileManager defaultManager] fileExistsAtPath:@"/Applications/Cydia.app"] ||
+                   [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"] ? @"Jailbroken" : @"Non-Jailbroken";
+    NSDictionary *info = [[NSBundle mainBundle] infoDictionary];
+
+    return @{
+        @"key": key ?: @"",
+        @"hwid": hwid,
+        @"deviceModel": model,
+        @"deviceName": dev.name ?: @"iPhone",
+        @"machineId": machine,
+        @"iosVersion": [NSString stringWithFormat:@"iOS %@", dev.systemVersion ?: @""],
+        @"systemName": dev.systemName ?: @"iOS",
+        @"battery": batStr,
+        @"batteryState": batState,
+        @"lowPowerMode": proc.isLowPowerModeEnabled ? @"ON" : @"OFF",
+        @"network": DarkIOS_NetworkType(),
+        @"localIp": DarkIOS_LocalIP(),
+        @"architecture": @"arm64e",
+        @"cpuCores": [NSString stringWithFormat:@"%lu", (unsigned long)proc.processorCount],
+        @"ramTotal": [NSString stringWithFormat:@"%.1f GB", totalRamGB],
+        @"ramUsed": @"Active",
+        @"storageTotal": [NSString stringWithFormat:@"%.1f GB", totalDiskGB],
+        @"storageFree": [NSString stringWithFormat:@"%.1f GB", freeDiskGB],
+        @"screenRes": [NSString stringWithFormat:@"%.0fx%.0f", bounds.size.width, bounds.size.height],
+        @"refreshRate": [NSString stringWithFormat:@"%ld Hz", (long)scr.maximumFramesPerSecond],
+        @"brightness": [NSString stringWithFormat:@"%.0f%%", scr.brightness * 100.f],
+        @"timezone": [NSTimeZone localTimeZone].name ?: @"Unknown",
+        @"locale": [NSLocale currentLocale].localeIdentifier ?: @"Unknown",
+        @"uptime": [NSString stringWithFormat:@"%.1f hours", proc.systemUptime / 3600.0],
+        @"bundleId": [[NSBundle mainBundle] bundleIdentifier] ?: @"Unknown",
+        @"appVersion": info[@"CFBundleShortVersionString"] ?: @"Unknown",
+        @"jailbreakStatus": jb
+    };
+}
+
+static UIWindow *DarkIOS_ActiveWindow(void) {
+    for (UIWindowScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if (scene.activationState == UISceneActivationStateForegroundActive) {
+            for (UIWindow *w in scene.windows) {
+                if (w.isKeyWindow) return w;
+            }
+            if (scene.windows.count > 0) return scene.windows.firstObject;
+        }
+    }
+    return nil;
+}
+
+@interface DarkIOSMenuTriggerHandler : NSObject
++ (void)syncFloatingButton;
++ (void)onMenuButtonTapped;
++ (void)onMenuButtonDragged:(UIPanGestureRecognizer *)pan;
+@end
+
+@implementation DarkIOSMenuTriggerHandler
+
++ (void)syncFloatingButton {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *win = DarkIOS_ActiveWindow();
+        if (!win) return;
+
+        UIView *existing = [win viewWithTag:kDarkIOSFloatingBtnTag];
+        if (!IsESPKeyVerifiedMenu()) {
+            MenDeal = false;
+            g_DarkIOSNewMenuOpen = false;
+            if (existing) [existing removeFromSuperview];
+            return;
+        }
+
+        if (!existing) {
+            UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+            btn.tag = kDarkIOSFloatingBtnTag;
+            btn.frame = CGRectMake(24, 130, 56, 36);
+            btn.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.08 alpha:0.94];
+            btn.layer.cornerRadius = 10.0;
+            btn.layer.borderWidth = 1.2;
+            btn.layer.borderColor = [UIColor colorWithRed:0.90 green:0.22 blue:0.27 alpha:0.85].CGColor;
+            [btn setTitle:@"MENU" forState:UIControlStateNormal];
+            [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            btn.titleLabel.font = [UIFont boldSystemFontOfSize:11.0];
+            [btn addTarget:self action:@selector(onMenuButtonTapped) forControlEvents:UIControlEventTouchUpInside];
+
+            UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(onMenuButtonDragged:)];
+            [btn addGestureRecognizer:pan];
+
+            [win addSubview:btn];
+        } else {
+            [win bringSubviewToFront:existing];
+        }
+    });
+}
+
++ (void)onMenuButtonTapped {
+    if (!IsESPKeyVerifiedMenu()) {
+        MenDeal = false;
+        return;
+    }
+    MenDeal = !MenDeal;
+}
+
++ (void)onMenuButtonDragged:(UIPanGestureRecognizer *)pan {
+    UIView *v = pan.view;
+    UIView *parent = v.superview;
+    if (!v || !parent) return;
+    CGPoint delta = [pan translationInView:parent];
+    CGPoint next = CGPointMake(v.center.x + delta.x, v.center.y + delta.y);
+    CGFloat halfW = v.bounds.size.width * 0.5;
+    CGFloat halfH = v.bounds.size.height * 0.5;
+    next.x = MAX(halfW + 8, MIN(parent.bounds.size.width - halfW - 8, next.x));
+    next.y = MAX(halfH + 24, MIN(parent.bounds.size.height - halfH - 24, next.y));
+    v.center = next;
+    [pan setTranslation:CGPointZero inView:parent];
+}
+
+@end
+
+extern "C" void DarkIOS_VerifyKeyOnline(const char *cKey, void (^completion)(bool ok, const char *message)) {
+    NSString *key = cKey ? [[NSString stringWithUTF8String:cKey] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
+    if (key.length == 0) {
+        if (completion) completion(false, "Key daxil edin");
+        return;
+    }
+
+    NSURL *url = [NSURL URLWithString:kDarkIOSVerifyEndpoint];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12.0];
+    req.HTTPMethod = @"POST";
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+
+    NSDictionary *payload = DarkIOS_CollectRealTelemetry(key);
+    req.HTTPBody = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+        (void)resp;
+        bool ok = false;
+        NSString *msg = @"Server cavab vermədi";
+
+        if (!err && data.length > 0) {
+            NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            NSRange brace = [raw rangeOfString:@"{"];
+            if (brace.location != NSNotFound) {
+                NSData *slice = [[raw substringFromIndex:brace.location] dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *obj = [NSJSONSerialization JSONObjectWithData:slice options:0 error:nil];
+                if ([obj isKindOfClass:[NSDictionary class]]) {
+                    ok = [obj[@"valid"] boolValue] || [obj[@"status"] isEqualToString:@"ok"];
+                    if ([obj[@"message"] isKindOfClass:[NSString class]]) {
+                        msg = obj[@"message"];
+                    } else {
+                        msg = ok ? @"Verified" : @"Key etibarsızdır";
+                    }
+                }
+            }
+        }
+
+        if (ok) {
+            g_DarkIOSServerVerified = true;
+            IsLogin = true;
+            MenDeal = false; // Öz-özünə açılmasın, yalnız menyu butonuna basanda açılsın
+            NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
+            [defs setBool:YES forKey:@"DARKIOS_Key_Verified_v1"];
+            [defs setBool:YES forKey:@"ESP_Key_Verified_v1"];
+            [defs setObject:key forKey:@"DARKIOS_Saved_Key_v1"];
+            [defs synchronize];
+            [DarkIOSMenuTriggerHandler syncFloatingButton];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) completion(ok, msg.UTF8String);
+        });
+    }] resume];
+}
+
+// ============================================================================
+
 UIImage* GetMenuBadgeImage() {
     static UIImage* badge = nil;
     static dispatch_once_t once;
@@ -314,9 +564,6 @@ UIImage* GetMenuBadgeImage() {
     return badge;
 }
 
-// HMOOD__TG@i_8_f
-
-
 typedef int (*ptrace_ptr_t)(int, pid_t, caddr_t, int);
 #define PT_DENY_ATTACH 31
 static void pg_deny_debugger(void) {
@@ -336,9 +583,6 @@ static void pg_deny_debugger(void) {
     pg_deny_debugger();
 }
 @end
-
-// HMOOD__TG@i_8_f
-
 
 namespace ImGui {
     inline void MergeIconsWithLatestFont(float font_size, bool FontDataOwnedByAtlas = false) {
@@ -471,9 +715,6 @@ void InitializeMenuFonts(ImGuiIO& io) {
     }
 }
 
-// HMOOD__TG@i_8_f
-
-
 void ApplyImGuiStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     s.WindowPadding = {0, 0};
@@ -534,9 +775,6 @@ void ApplyImGuiStyle() {
     c[ImGuiCol_TableRowBgAlt] = {1.f, 1.f, 1.f, 0.025f};
 }
 
-// HMOOD__TG@i_8_f
-
-
 namespace MenuLocale {
     static int language = 0;
     static const char* languageNames[] = {"English", "کوردی (سۆرانی)", "简体中文", "Русский", "العربية", "हिन्दी", "Türkçe"};
@@ -577,125 +815,11 @@ namespace MenuLocale {
             {"lootbox", {{"سندووقی کەلوپەل", "战利品箱", "Ящики добычи", "صناديق اللوت", "लूट बॉक्स", "Ganimet kutusu"}}},
             {"items esp", {{"پیشاندانی کەلوپەل", "显示物品", "Показ предметов", "إظهار الأغراض", "वस्तुएँ दिखाएँ", "Eşyaları göster"}}},
             {"vehicle esp", {{"پیشاندانی ئۆتۆمبێل", "显示载具", "Показ транспорта", "إظهار المركبات", "वाहन दिखाएँ", "Araçları göster"}}},
-            {"existing display settings", {{"ڕێکخستنی پیشاندان", "显示设置", "Настройки отображения", "إعدادات العرض", "प्रदर्शन सेटिंग्स", "Görüntü ayarları"}}},
-            {"esp distance", {{"دووری پیشاندان", "显示距离上限", "Дальность ESP", "مدى العرض", "दिखाने की दूरी", "ESP mesafesi"}}},
-            {"hp scale", {{"قەبارەی کارتی تەندروستی", "生命卡缩放", "Размер карточки здоровья", "حجم بطاقة الدم", "स्वास्थ्य कार्ड का आकार", "Can kartı boyutu"}}},
-            {"alert radius", {{"نیوەتیرەی ئاگاداری", "警报半径", "Радиус оповещения", "نطاق التنبيه", "चेतावनी का दायरा", "Uyarı yarıçapı"}}},
-            {"stroke width", {{"ئەستووری چوارچێوە", "描边宽度", "Толщина обводки", "سماكة الحواف", "किनारे की मोटाई", "Çerçeve kalınlığı"}}},
-            {"text border", {{"چوارچێوەی نووسین", "文字描边", "Обводка текста", "حواف النص", "पाठ का किनारा", "Yazı çerçevesi"}}},
-            {"hide name", {{"شاردنەوەی ناو", "隐藏姓名", "Скрыть имя", "إخفاء الاسم", "नाम छिपाएँ", "İsmi gizle"}}},
-            {"distance color", {{"ڕەنگی دووری", "距离颜色", "Цвет расстояния", "لون المسافة", "दूरी का रंग", "Mesafe rengi"}}},
-            {"border color", {{"ڕەنگی چوارچێوە", "描边颜色", "Цвет обводки", "لون الحواف", "किनारे का रंग", "Çerçeve rengi"}}},
-            {"aim settings", {{"ڕێکخستنی ئامانجگیری", "瞄准设置", "Настройки прицела", "إعدادات التصويب", "निशाने की सेटिंग्स", "Nişan ayarları"}}},
-            {"aim control", {{"کۆنترۆڵی ئامانجگیری", "瞄准控制", "Управление прицелом", "التحكم بالتصويب", "निशाने का नियंत्रण", "Nişan kontrolü"}}},
-            {"silent aim", {{"ئامانجگیری بێدەنگ", "静默瞄准", "Тихий прицел", "تصويب صامت", "साइलेंट निशाना", "Sessiz nişan"}}},
-            {"macro", {{"ماکرۆ", "宏", "Макрос", "ماكرو", "मैक्रो", "Makro"}}},
-            {"aim line", {{"هێڵی ئامانجگیری", "瞄准线", "Линия прицела", "خط التصويب", "निशाने की रेखा", "Nişan çizgisi"}}},
-            {"auto fire", {{"تەقەی خۆکار", "自动开火", "Автоогонь", "إطلاق تلقائي", "अपने आप गोली", "Otomatik ateş"}}},
-            {"visibility check", {{"پشکنینی بینین", "可见性检查", "Проверка видимости", "فحص الرؤية", "दृश्यता जाँच", "Görünürlük kontrolü"}}},
-            {"ignore bots", {{"پشتگوێخستنی بۆت", "忽略机器人", "Игнорировать ботов", "تجاهل البوتات", "बॉट को छोड़ें", "Botları yok say"}}},
-            {"ignore knocked", {{"پشتگوێخستنی کەوتوو", "忽略倒地玩家", "Игнорировать сбитых", "تجاهل المطروحين", "गिरे खिलाड़ियों को छोड़ें", "Yerdekileri yok say"}}},
-            {"enable fov", {{"پیشاندانی بازنە", "显示视野圈", "Показать круг FOV", "إظهار دائرة التصويب", "दायरा दिखाएँ", "FOV dairesini göster"}}},
-            {"aim target", {{"شوێنی ئامانج", "瞄准部位", "Точка прицеливания", "موضع التصويب", "निशाने का स्थान", "Nişan noktası"}}},
-            {"head", {{"سەر", "头部", "Голова", "الرأس", "सिर", "Baş"}}},
-            {"neck", {{"مل", "颈部", "Шея", "الرقبة", "गर्दन", "Boyun"}}},
-            {"body", {{"لەش", "身体", "Корпус", "الجسم", "शरीर", "Gövde"}}},
-            {"pelvis", {{"لگن", "骨盆", "Таз", "الحوض", "कूल्हा", "Kalça"}}},
-            {"auto", {{"خۆکار", "自动", "Авто", "تلقائي", "स्वचालित", "Otomatik"}}},
-            {"fire", {{"تەقە", "开火", "Огонь", "إطلاق", "गोली चलाना", "Ateş"}}},
-            {"ads", {{"نیشانەگرتن", "开镜", "Прицеливание", "فتح السكوب", "स्कोप खोलना", "Dürbün"}}},
-            {"fire + ads", {{"تەقە و نیشانە", "开火且开镜", "Огонь и прицел", "إطلاق مع سكوب", "गोली और स्कोप", "Ateş ve dürbün"}}},
-            {"fire or ads", {{"تەقە یان نیشانە", "开火或开镜", "Огонь или прицел", "إطلاق أو سكوب", "गोली या स्कोप", "Ateş veya dürbün"}}},
-            {"fov", {{"بازنەی ئامانج", "瞄准范围", "Поле прицела", "دائرة التصويب", "निशाने का दायरा", "Nişan alanı"}}},
-            {"distance", {{"دووری", "距离", "Дальность", "المسافة", "दूरी", "Mesafe"}}},
-            {"aim speed", {{"خێرایی ئامانج", "瞄准速度", "Скорость прицела", "سرعة التصويب", "निशाने की गति", "Nişan hızı"}}},
-            {"hit probability", {{"ئەگەری پێکان", "命中概率", "Вероятность попадания", "احتمال الإصابة", "लगने की संभावना", "İsabet olasılığı"}}},
-            {"mode", {{"دۆخ", "模式", "Режим", "الوضع", "मोड", "Mod"}}},
-            {"safe", {{"پارێزراو", "安全", "Безопасный", "آمن", "सुरक्षित", "Güvenli"}}},
-            {"risk", {{"مەترسیدار", "高风险", "Рискованный", "مخاطرة", "जोखिम", "Riskli"}}},
-            {"custom", {{"تایبەت", "自定义", "Свой", "مخصص", "कस्टम", "Özel"}}},
-            {"prediction", {{"پێشبینی جووڵە", "移动预测", "Упреждение", "توقع الحركة", "गति का अनुमान", "Hareket tahmini"}}},
-            {"max step", {{"زۆرترین هەنگاو", "最大步长", "Максимальный шаг", "أقصى خطوة", "अधिकतम कदम", "En büyük adım"}}},
-            {"magic x", {{"ماجیک X", "魔术 X", "Магия X", "ماجيك X", "मैजिक X", "Magic X"}}},
-            {"magic y", {{"ماجیک Y", "魔术 Y", "Магия Y", "ماجيك Y", "मैजिक Y", "Magic Y"}}},
-            {"magic z", {{"ماجیک Z", "魔术 Z", "Магия Z", "ماجيك Z", "मैजिक Z", "Magic Z"}}},
-            {"auto tap", {{"کرتەی خۆکار", "自动点击", "Автонажатие", "نقر تلقائي", "अपने आप टैप", "Otomatik dokunma"}}},
-            {"fast shoot", {{"تەقەی خێرا", "快速射击", "Быстрая стрельба", "إطلاق سريع", "तेज़ गोली", "Hızlı ateş"}}},
-            {"fast scope", {{"نیشانەی خێرا", "快速开镜", "Быстрый прицел", "سكوب سريع", "तेज़ स्कोप", "Hızlı dürbün"}}},
-            {"fast gun", {{"گۆڕینی خێرای چەک", "快速换枪", "Быстрая смена оружия", "تبديل سلاح سريع", "तेज़ हथियार बदलना", "Hızlı silah değişimi"}}},
-            {"spin", {{"سووڕانەوە", "旋转", "Вращение", "دوران", "घूमना", "Dönüş"}}},
-            {"zoom", {{"نزیککردنەوە", "缩放", "Приближение", "تكبير", "ज़ूम", "Yakınlaştırma"}}},
-            {"ipad", {{"ئایپاد", "iPad 视角", "Вид iPad", "منظور آيباد", "आईपैड दृश्य", "iPad görünümü"}}},
-            {"no recoil", {{"بێ پاشەکشە", "无后坐力", "Без отдачи", "بدون ارتداد", "बिना झटके", "Geri tepme yok"}}},
-            {"no shake", {{"بێ لەرزین", "无镜头抖动", "Без тряски", "بدون اهتزاز", "बिना कंपन", "Sarsıntı yok"}}},
-            {"hitx", {{"نیشانەی پێکان", "命中特效", "Эффект попадания", "مؤثر الإصابة", "हिट प्रभाव", "İsabet efekti"}}},
-            {"damage", {{"زیان", "伤害", "Урон", "الضرر", "नुकसान", "Hasar"}}},
-            {"small cross", {{"نیشانەی بچووک", "小准星", "Малый прицел", "مؤشر تصويب صغير", "छोटा क्रॉसहेयर", "Küçük nişangâh"}}},
-            {"rainbow", {{"کەوانەی ڕەنگین", "彩虹", "Радуга", "ألوان متغيرة", "इंद्रधनुष", "Gökkuşağı"}}},
-            {"cross spin", {{"سووڕانی نیشانە", "准星旋转", "Вращение прицела", "دوران المؤشر", "क्रॉसहेयर घूमना", "Nişangâh dönüşü"}}},
-            {"fast drop", {{"دابەزینی خێرا", "快速降落", "Быстрое падение", "نزول سريع", "तेज़ उतरना", "Hızlı iniş"}}},
-            {"super run", {{"ڕاکردنی خێرا", "极速奔跑", "Быстрый бег", "جري سريع", "तेज़ दौड़", "Hızlı koşu"}}},
-            {"spin speed", {{"خێرایی سووڕانەوە", "旋转速度", "Скорость вращения", "سرعة الدوران", "घूमने की गति", "Dönüş hızı"}}},
-            {"ipad view", {{"مەودای بینینی ئایپاد", "iPad 视野", "Обзор iPad", "مدى منظور آيباد", "आईपैड का दृश्य", "iPad görüş alanı"}}},
-            {"cross size", {{"قەبارەی نیشانە", "准星大小", "Размер прицела", "حجم المؤشر", "क्रॉसहेयर का आकार", "Nişangâh boyutu"}}},
-            {"license", {{"مۆڵەت", "授权", "Лицензия", "الترخيص", "लाइसेंस", "Lisans"}}},
-            {"expires", {{"کاتی بەسەرچوون", "到期时间", "Истекает", "ينتهي", "समाप्ति", "Bitiş"}}},
-            {"device", {{"ئامێر", "设备", "Устройство", "الجهاز", "डिवाइस", "Cihaz"}}},
-            {"key", {{"کلیل", "密钥", "Ключ", "المفتاح", "कुंजी", "Anahtar"}}},
-            {"not configured", {{"ڕێک نەخراوە", "未配置", "Не настроено", "غير مهيأ", "सेट नहीं है", "Yapılandırılmadı"}}},
-            {"game mode", {{"دۆخی یاری", "游戏模式", "Режим игры", "وضع اللعبة", "खेल मोड", "Oyun modu"}}},
-            {"local mode", {{"دۆخی ناوخۆیی", "本地模式", "Локальный режим", "وضع محلي", "स्थानीय मोड", "Yerel mod"}}},
-            {"no license service", {{"خزمەتگوزاری مۆڵەت نییە", "未连接授权服务", "Нет сервиса лицензий", "لا توجد خدمة ترخيص", "लाइसेंस सेवा नहीं है", "Lisans hizmeti yok"}}},
-            {"open mode", {{"کردنەوەی دۆخ", "打开模式", "Открыть режим", "فتح الوضع", "मोड खोलें", "Modu aç"}}},
-            {"ram booster", {{"پاککردنەوەی بیرگە", "内存清理", "Очистка памяти", "تنظيف الذاكرة", "मेमोरी सफ़ाई", "Bellek temizleme"}}},
-            {"app", {{"بەرنامە", "应用", "Приложение", "التطبيق", "ऐप", "Uygulama"}}},
-            {"free", {{"بەتاڵ", "空闲", "Свободно", "المتاح", "खाली", "Boş"}}},
-            {"purge", {{"پاککردنەوە", "立即清理", "Очистить", "تنظيف", "साफ़ करें", "Temizle"}}},
-            {"auto-clean: off", {{"پاککردنەوەی خۆکار: ناچالاک", "自动清理：关闭", "Автоочистка: выкл.", "تنظيف تلقائي: متوقف", "अपने आप सफ़ाई: बंद", "Otomatik temizlik: kapalı"}}},
-            {"preferences", {{"هەڵبژاردەکان", "偏好设置", "Предпочтения", "التفضيلات", "प्राथमिकताएँ", "Tercihler"}}},
-            {"stream: on", {{"شاردنەوە لە تۆمار: چالاک", "录屏隐藏：开启", "Скрытие записи: вкл.", "إخفاء التسجيل: مفعّل", "रिकॉर्डिंग में छिपाएँ: चालू", "Kayıtta gizleme: açık"}}},
-            {"stream: off", {{"شاردنەوە لە تۆمار: ناچالاک", "录屏隐藏：关闭", "Скрытие записи: выкл.", "إخفاء التسجيل: متوقف", "रिकॉर्डिंग में छिपाएँ: बंद", "Kayıtta gizleme: kapalı"}}},
-            {"stream", {{"شاردنەوە لە تۆمار", "录屏隐藏", "Скрытие записи", "إخفاء التسجيل", "रिकॉर्डिंग में छिपाएँ", "Kayıtta gizleme"}}},
-            {"language", {{"زمان", "语言", "Язык", "اللغة", "भाषा", "Dil"}}},
-            {"reset guest", {{"ڕیسێتی میوان", "重置游客", "Сбросить гостя", "إعادة ضبط الضيف", "अतिथि रीसेट", "Misafiri sıfırla"}}},
-            {"reset guest account?", {{"هەژماری میوان ڕیسێت بکرێت؟", "重置游客账号？", "Сбросить гостевой аккаунт?", "إعادة ضبط حساب الضيف؟", "अतिथि खाता रीसेट करें?", "Misafir hesabı sıfırlansın mı?"}}},
-            {"this deletes local game data, settings and account data.", {{"ئەمە داتای ناوخۆیی یاری و ڕێکخستن و هەژمار دەسڕێتەوە.", "这将删除本地游戏数据、设置和账号数据。", "Будут удалены локальные данные игры, настройки и данные аккаунта.", "سيحذف هذا بيانات اللعبة المحلية والإعدادات وبيانات الحساب.", "इससे स्थानीय गेम डेटा, सेटिंग्स और खाते का डेटा मिट जाएगा।", "Yerel oyun verileri, ayarlar ve hesap verileri silinecek."}}},
-            {"the game will exit after the reset.", {{"دوای ڕیسێت یاری دادەخرێت.", "重置后游戏将退出。", "После сброса игра закроется.", "ستُغلق اللعبة بعد إعادة الضبط.", "रीसेट के बाद खेल बंद हो जाएगा।", "Sıfırlamadan sonra oyun kapanacak."}}},
-            {"cancel", {{"پاشگەزبوونەوە", "取消", "Отмена", "إلغاء", "रद्द करें", "İptal"}}},
-            {"server", {{"ڕاژەکار", "服务器", "Сервер", "السيرفر", "सर्वर", "Sunucu"}}},
-            {"unavailable", {{"بەردەست نییە", "不可用", "Недоступно", "غير متاح", "उपलब्ध नहीं", "Kullanılamıyor"}}},
-            {"subscription", {{"بەشداری", "订阅", "Подписка", "الاشتراك", "सदस्यता", "Abonelik"}}},
-            {"device link", {{"بەستەری ئامێر", "设备绑定", "Привязка устройства", "ربط الجهاز", "डिवाइस लिंक", "Cihaz bağlantısı"}}},
-            {"contact", {{"پەیوەندی", "联系我们", "Связь", "التواصل", "संपर्क", "İletişim"}}},
-            {"telegram", {{"تێلیگرام", "Telegram", "Telegram", "تيليجرام", "टेलीग्राम", "Telegram"}}},
-            {"support", {{"پشتگیری", "支持", "Поддержка", "الدعم", "सहायता", "Destek"}}},
-            {"live", {{"ڕاستەوخۆ", "实时", "В эфире", "مباشر", "लाइव", "Canlı"}}},
-            {"os", {{"سیستەم", "系统", "ОС", "النظام", "सिस्टम", "Sistem"}}},
-            {"ram", {{"بیرگە", "内存", "Память", "الذاكرة", "मेमोरी", "Bellek"}}},
             {"enabled", {{"چالاک کرا", "已启用", "Включено", "تم التفعيل", "चालू", "Etkin"}}},
             {"disabled", {{"ناچالاک کرا", "已关闭", "Выключено", "تم الإيقاف", "बंद", "Devre dışı"}}},
             {"close menu", {{"داخستنی لیستە", "关闭菜单", "Закрыть меню", "إغلاق القائمة", "मेन्यू बंद करें", "Menüyü kapat"}}},
-            {"not available in the current project", {{"ئەم تایبەتمەندییە بەردەست نییە.", "此功能暂不可用。", "Эта функция недоступна.", "هذه الميزة غير متاحة.", "यह सुविधा उपलब्ध नहीं है।", "Bu özellik kullanılamıyor."}}},
-            {"not available, or controlled by the selected preset", {{"بەردەست نییە یان لە دۆخی ئێستا جێگیرە.", "此选项不可用，或由当前预设控制。", "Недоступно или задано текущим профилем.", "غير متاح أو يتحكم به الوضع المحدد.", "उपलब्ध नहीं या चुना गया मोड इसे नियंत्रित करता है।", "Kullanılamıyor veya seçili profil tarafından yönetiliyor."}}},
-            {"enable aimbot and select risk or custom to use silent aim", {{"ئامانجگیری چالاک بکە و مەترسیدار یان تایبەت هەڵبژێرە.", "请启用辅助瞄准，并选择高风险或自定义模式。", "Включите автоприцел и выберите рискованный или свой режим.", "فعّل التصويب واختر وضع مخاطرة أو مخصص لاستخدام التصويب الصامت.", "साइलेंट निशाने के लिए स्वचालित निशाना चालू करें और जोखिम या कस्टम मोड चुनें।", "Sessiz nişan için otomatik nişanı açıp riskli veya özel modu seçin."}}},
-            {"open additional existing display settings", {{"ڕێکخستنی زیاتری پیشاندان بکەرەوە.", "打开更多显示设置。", "Открыть дополнительные настройки отображения.", "فتح إعدادات العرض الإضافية.", "प्रदर्शन की अतिरिक्त सेटिंग्स खोलें।", "Ek görüntü ayarlarını aç."}}},
-            {"open existing safe / risk / custom modes and additional settings", {{"دۆخ و ڕێکخستنی زیاتری ئامانجگیری بکەرەوە.", "打开瞄准模式和更多设置。", "Открыть режимы и дополнительные настройки прицела.", "فتح أوضاع التصويب والإعدادات الإضافية.", "निशाने के मोड और अतिरिक्त सेटिंग्स खोलें।", "Nişan modlarını ve ek ayarları aç."}}},
-            {"more memory options", {{"هەڵبژاردەی زیاتری بیرگە", "更多内存选项", "Дополнительные опции памяти", "خيارات الذاكرة الإضافية", "मेमोरी के अधिक विकल्प", "Diğer bellek seçenekleri"}}},
-            {"no contact link is configured in this project", {{"بەستەری پەیوەندی دانەنراوە.", "尚未设置联系链接。", "Ссылка для связи не настроена.", "لم يُضف رابط للتواصل.", "संपर्क लिंक सेट नहीं है।", "İletişim bağlantısı ayarlanmadı."}}},
-            {"no support link is configured in this project", {{"بەستەری پشتگیری دانەنراوە.", "尚未设置支持链接。", "Ссылка поддержки не настроена.", "لم يُضف رابط للدعم.", "सहायता लिंक सेट नहीं है।", "Destek bağlantısı ayarlanmadı."}}},
-            {"no mode or licensing service is configured", {{"خزمەتگوزاری دۆخ یان مۆڵەت ڕێک نەخراوە.", "尚未配置模式或授权服务。", "Сервис режимов или лицензий не настроен.", "خدمة الأوضاع أو الترخيص غير مهيأة.", "मोड या लाइसेंस सेवा सेट नहीं है।", "Mod veya lisans hizmeti ayarlanmadı."}}},
-            {"the current project has no memory purge operation", {{"پاککردنەوەی بیرگە بەردەست نییە.", "内存清理暂不可用。", "Очистка памяти недоступна.", "تنظيف الذاكرة غير متاح.", "मेमोरी सफ़ाई उपलब्ध नहीं है।", "Bellek temizleme kullanılamıyor."}}},
-            {"automatic cleaning is not configured", {{"پاککردنەوەی خۆکار ڕێک نەخراوە.", "尚未设置自动清理。", "Автоочистка не настроена.", "التنظيف التلقائي غير مهيأ.", "अपने आप सफ़ाई सेट नहीं है।", "Otomatik temizlik ayarlanmadı."}}},
-            {"red", {{"سوور", "红色", "Красный", "أحمر", "लाल", "Kırmızı"}}},
-            {"green", {{"سەوز", "绿色", "Зелёный", "أخضر", "हरा", "Yeşil"}}},
-            {"blue", {{"شین", "蓝色", "Синий", "أزرق", "नीला", "Mavi"}}},
-            {"opacity", {{"ڕوونی", "不透明度", "Непрозрачность", "العتامة", "अपारदर्शिता", "Opaklık"}}},
-            {"guest reset complete. game will exit in 5s.", {{"ڕیسێتی میوان تەواو بوو. یاری دوای ٥ چرکە دادەخرێت.", "游客账号已重置。游戏将在 5 秒后退出。", "Гостевой аккаунт сброшен. Игра закроется через 5 секунд.", "اكتملت إعادة ضبط الضيف. ستُغلق اللعبة بعد ٥ ثوانٍ.", "अतिथि रीसेट पूरा हुआ। खेल 5 सेकंड में बंद हो जाएगा।", "Misafir sıfırlandı. Oyun 5 saniye sonra kapanacak."}}},
-            {"enable aimbot first", {{"سەرەتا ئامانجگیری چالاک بکە", "请先启用辅助瞄准", "Сначала включите автоприцел", "فعّل التصويب التلقائي أولاً", "पहले स्वचालित निशाना चालू करें", "Önce otomatik nişanı açın"}}},
-            {"disable silent aim to adjust camera movement", {{"ئامانجگیری بێدەنگ ناچالاک بکە بۆ ڕێکخستنی جووڵەی کامێرا", "关闭静默瞄准以调整镜头移动", "Отключите тихий прицел для настройки движения камеры", "أوقف التصويب الصامت لضبط حركة الكاميرا", "कैमरे की गति बदलने के लिए साइलेंट निशाना बंद करें", "Kamera hareketini ayarlamak için sessiz nişanı kapatın"}}},
-            {"enable silent aim to adjust hit probability", {{"ئامانجگیری بێدەنگ چالاک بکە بۆ ڕێکخستنی ڕێژەی پێکان", "启用静默瞄准以调整命中概率", "Включите тихий прицел для настройки вероятности попадания", "فعّل التصويب الصامت لضبط نسبة الإصابة", "हिट की संभावना बदलने के लिए साइलेंट निशाना चालू करें", "İsabet olasılığını ayarlamak için sessiz nişanı açın"}}},
-            {"fov applies to camera aim", {{"مەودای بینین بۆ ئامانجگیری کامێرایە", "视野范围用于镜头瞄准", "Радиус применяется к наведению камеры", "دائرة التصويب تخص تصويب الكاميرا", "दायरा कैमरे के निशाने के लिए है", "Görüş alanı kamera nişanı içindir"}}},
-            {"wide", {{"پانایی", "视野", "Обзор", "اتساع المنظور", "चौड़ा दृश्य", "Genişlik"}}},
+            {"language", {{"زمان", "语言", "Язык", "اللغة", "भाषा", "Dil"}}},
+            {"reset guest", {{"ڕیسێتی میوان", "重置游客", "Сбросить гостя", "إعادة ضبط الضيف", "अतिथि रीसेट", "Misafiri sıfırla"}}},
         };
         const auto found = phrases.find(key(value));
         return found == phrases.end() ? value : found->second[language - 1];
@@ -874,18 +998,6 @@ namespace MenuLocale {
         ImGui::PopID();
         return changed;
     }
-    static bool sliderInt(const char* label, int* value, int low, int high) {
-        if (!native(tr(label))) return ImGui::SliderInt(label, value, low, high);
-        ImGui::PushID(label);
-        ImGui::BeginGroup();
-        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.f);
-        const bool changed = ImGui::SliderInt("##value", value, low, high);
-        ImGui::SameLine();
-        widgetLabel(label);
-        ImGui::EndGroup();
-        ImGui::PopID();
-        return changed;
-    }
     static bool colorEdit(const char* label, float* value) {
         if (!native(tr(label))) return ImGui::ColorEdit4(label, value);
         ImGui::PushID(label);
@@ -906,30 +1018,6 @@ namespace MenuLocale {
         ImGui::PopID();
         return changed;
     }
-    static bool combo(const char* label, int* value, const char* const* choices, int count) {
-        if (language == 0) return ImGui::Combo(label, value, choices, count);
-        ImGui::PushID(label);
-        ImGui::BeginGroup();
-        const ImVec2 position = ImGui::GetCursorScreenPos();
-        const float width = ImGui::GetFontSize() * 14.f;
-        ImDrawList* owner = ImGui::GetWindowDrawList();
-        ImGui::SetNextItemWidth(width);
-        const bool open = ImGui::BeginCombo("##choice", "");
-        draw(owner, choices[ImClamp(*value, 0, count - 1)],
-             ImVec2(position.x + 5.f, position.y + ImGui::GetStyle().FramePadding.y), ImGui::GetFontSize(),
-             ImGui::GetColorU32(ImGuiCol_Text), width - ImGui::GetFrameHeight() - 10.f, rtl());
-        bool changed = false;
-        if (open) {
-            for (int i = 0; i < count; ++i)
-                if (selectable(choices[i], *value == i)) { *value = i; changed = true; }
-            ImGui::EndCombo();
-        }
-        ImGui::SameLine();
-        widgetLabel(label);
-        ImGui::EndGroup();
-        ImGui::PopID();
-        return changed;
-    }
     static bool button(const char* label, ImVec2 size) {
         if (!native(tr(label))) return ImGui::Button(label, size);
         const ImVec2 position = ImGui::GetCursorScreenPos();
@@ -945,15 +1033,11 @@ namespace MenuLocale {
     }
 }
 
-// HMOOD__TG@i_8_f
 void SetMenuLanguage(int language) { MenuLocale::language = language < 0 ? 0 : language > 6 ? 6 : language; }
 int GetMenuLanguage() { return MenuLocale::language; }
 const char* TranslateMenuText(const char* value) { return MenuLocale::tr(value); }
 
-
 namespace CyberMenu {
-// HMOOD__TG@i_8_f
-
 
     static const ImU32 Red = IM_COL32(195, 12, 41, 255);
     static const ImU32 White = IM_COL32(203, 204, 209, 255);
@@ -999,9 +1083,6 @@ namespace CyberMenu {
         }
     };
 
-// HMOOD__TG@i_8_f
-
-
     struct PageMotion {
         int page = -1;
         bool shown = false;
@@ -1026,7 +1107,7 @@ namespace CyberMenu {
         float offset() const {
             if (opening && page == 0)
                 return 0.f;
-            static const float residual[] = {1.f,   .707f,  .467f,  .280f,  .147f,  .080f,
+            static const float residual[] = {1.f, .707f, .467f, .280f, .147f, .080f,
                                              .013f, -.013f, -.013f, -.013f, -.013f, 0.f};
             const int last = (int)(sizeof(residual) / sizeof(residual[0])) - 1;
             const float sample = age * 60.f;
@@ -1059,9 +1140,6 @@ namespace CyberMenu {
             color = (color & ~IM_COL32_A_MASK) | ((ImU32)(alpha * opacity + .5f) << IM_COL32_A_SHIFT);
         }
     }
-
-// HMOOD__TG@i_8_f
-
 
     struct Reference {
         id<MTLTexture> texture;
@@ -1133,107 +1211,6 @@ namespace CyberMenu {
         return result;
     }
 
-    static Reference& highQualityFrame() {
-        return artwork(0);
-    }
-
-    static Reference& navigationTexture(int tab, bool selected) {
-        static Reference faces[5][2] = {};
-        static bool attempted[5][2] = {};
-        const int state = selected ? 1 : 0;
-        Reference& face = faces[tab][state];
-        if (attempted[tab][state])
-            return face;
-        attempted[tab][state] = true;
-        @autoreleasepool {
-            NSString* encoded = [[NSString alloc] initWithUTF8String:kCyberNavigation9230];
-            NSData* data = [[NSData alloc] initWithBase64EncodedString:encoded options:0];
-            UIImage* source = data ? [UIImage imageWithData:data] : nil;
-            const CGRect crop = CGRectMake(49, 20 + tab * 150, 295, 139);
-            CGImageRef own = source.CGImage ? CGImageCreateWithImageInRect(source.CGImage, crop) : nullptr;
-            id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-            if (!own || !device) {
-                if (own)
-                    CGImageRelease(own);
-                return face;
-            }
-            MTKTextureLoader* loader = [[MTKTextureLoader alloc] initWithDevice:device];
-            NSDictionary* options = @{
-                MTKTextureLoaderOptionSRGB : @NO,
-                MTKTextureLoaderOptionOrigin : MTKTextureLoaderOriginTopLeft,
-                MTKTextureLoaderOptionTextureUsage : @(MTLTextureUsageShaderRead)
-            };
-            const size_t width = CGImageGetWidth(own), height = CGImageGetHeight(own);
-            face.w = (float)width;
-            face.h = (float)height;
-            const bool nativeState = (tab == 3) == selected;
-            if (nativeState)
-                face.texture = [loader newTextureWithCGImage:own options:options error:nil];
-            else {
-                CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                auto pixels = [&](CGImageRef image, std::vector<uint8_t>& buffer) -> bool {
-                    buffer.resize(width * height * 4);
-                    CGContextRef context =
-                        space
-                            ? CGBitmapContextCreate(buffer.data(), width, height, 8, width * 4, space,
-                                                    kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big)
-                            : nullptr;
-                    if (!context)
-                        return false;
-                    CGContextDrawImage(context, CGRectMake(0, 0, width, height), image);
-                    CGContextFlush(context);
-                    CGContextRelease(context);
-                    return true;
-                };
-                CGImageRef plate = CGImageCreateWithImageInRect(
-                    source.CGImage, CGRectMake(49, selected ? 470 : 20, 295, 139));
-                std::vector<uint8_t> foreground, composed;
-                if (plate && pixels(own, foreground) && pixels(plate, composed)) {
-                    for (size_t y = 0; y < height; ++y)
-                        for (size_t x = 0; x < width; ++x) {
-                            const bool body = x >= 23 && x < 270 && y >= 33 && y < 109;
-                            const bool tallIcon = x >= 23 && x < 106 && y >= 28 && y < 109;
-                            if (!body && !tallIcon)
-                                continue;
-                            const size_t offset = (y * width + x) * 4;
-                            uint8_t* pixel = composed.data() + offset;
-                            for (int k = 0; k < 4; ++k)
-                                pixel[k] = foreground[offset + k];
-                            if (!selected) {
-                                if (pixel[1] > pixel[0] + 6 || pixel[2] > pixel[0] + 6) {
-                                    const uint8_t neutral =
-                                        (uint8_t)(pixel[0] * .30f + pixel[1] * .52f + pixel[2] * .18f);
-                                    pixel[0] = pixel[1] = pixel[2] = neutral;
-                                }
-                            } else if (ImMax(pixel[0], ImMax(pixel[1], pixel[2])) > 110) {
-                                pixel[0] = (uint8_t)(pixel[0] * .95f);
-                                pixel[2] = (uint8_t)(pixel[2] * .96f);
-                            }
-                        }
-                    CGContextRef context =
-                        CGBitmapContextCreate(composed.data(), width, height, 8, width * 4, space,
-                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
-                    CGImageRef result = context ? CGBitmapContextCreateImage(context) : nullptr;
-                    if (result) {
-                        face.texture = [loader newTextureWithCGImage:result options:options error:nil];
-                        CGImageRelease(result);
-                    }
-                    if (context)
-                        CGContextRelease(context);
-                }
-                if (plate)
-                    CGImageRelease(plate);
-                if (space)
-                    CGColorSpaceRelease(space);
-            }
-            CGImageRelease(own);
-        }
-        return face;
-    }
-
-// HMOOD__TG@i_8_f
-
-
     static bool hit(const Canvas& c, const char* id, float x, float y, float w, float h,
                     bool available = true, const char* reason = nullptr) {
         ImGui::SetCursorScreenPos(c.p(x, y));
@@ -1247,89 +1224,27 @@ namespace CyberMenu {
     }
 
     enum IconKind {
-        Player = 0,
-        Target,
-        List,
-        Box,
-        Warning,
-        Group,
-        Ruler,
-        Bolt,
-        NameCard,
-        Question,
-        Information,
-        Health,
-        Compass,
-        Bone,
-        Robot,
-        Shield,
-        Loot,
-        Items,
-        Car,
-        Wand,
-        Flame,
-        Skull,
-        Fov,
-        Gauge,
-        Percent,
-        PaperPlane,
-        Headset,
-        Link,
-        Cloud,
-        Eye,
-        Gear,
-        Globe,
-        Reset,
-        Gamepad,
-        Phone,
-        Calendar,
-        Check,
-        Database,
-        MemoryChip
+        Player = 0, Target, List, Box, Warning, Group, Ruler, Bolt, NameCard, Question,
+        Information, Health, Compass, Bone, Robot, Shield, Loot, Items, Car, Wand,
+        Flame, Skull, Fov, Gauge, Percent, PaperPlane, Headset, Link, Cloud, Eye,
+        Gear, Globe, Reset, Gamepad, Phone, Calendar, Check, Database, MemoryChip
     };
 
     static void icon(const Canvas& c, int kind, float x, float y, float size, ImU32 color = Red) {
         if (kind < 0)
             return;
-        static const char* const symbols[] = {ICON_FA_USER,
-                                              ICON_FA_CROSSHAIRS,
-                                              ICON_FA_LIST,
-                                              ICON_FA_VECTOR_SQUARE,
-                                              ICON_FA_EXCLAMATION_TRIANGLE,
-                                              ICON_FA_USERS,
-                                              ICON_FA_RULER,
-                                              ICON_FA_BOLT,
-                                              ICON_FA_ADDRESS_CARD,
-                                              ICON_FA_QUESTION,
-                                              ICON_FA_INFO_CIRCLE,
-                                              ICON_FA_HEARTBEAT,
-                                              ICON_FA_COMPASS,
-                                              ICON_FA_BONE,
-                                              ICON_FA_ROBOT,
-                                              ICON_FA_SHIELD_ALT,
-                                              ICON_FA_BOX_OPEN,
-                                              ICON_FA_BOXES,
-                                              ICON_FA_CAR,
-                                              ICON_FA_MAGIC,
-                                              ICON_FA_FIRE,
-                                              ICON_FA_SKULL,
-                                              ICON_FA_EXPAND,
-                                              ICON_FA_TACHOMETER_ALT,
-                                              ICON_FA_PERCENT,
-                                              ICON_FA_PAPER_PLANE,
-                                              ICON_FA_HEADSET,
-                                              ICON_FA_LINK,
-                                              ICON_FA_CLOUD,
-                                              ICON_FA_EYE,
-                                              ICON_FA_COG,
-                                              ICON_FA_GLOBE,
-                                              ICON_FA_SYNC_ALT,
-                                              ICON_FA_GAMEPAD,
-                                              ICON_FA_MOBILE_ALT,
-                                              ICON_FA_CALENDAR_ALT,
-                                              ICON_FA_CHECK_CIRCLE,
-                                              ICON_FA_DATABASE,
-                                              ICON_FA_MEMORY};
+        static const char* const symbols[] = {
+            ICON_FA_USER, ICON_FA_CROSSHAIRS, ICON_FA_LIST, ICON_FA_VECTOR_SQUARE,
+            ICON_FA_EXCLAMATION_TRIANGLE, ICON_FA_USERS, ICON_FA_RULER, ICON_FA_BOLT,
+            ICON_FA_ADDRESS_CARD, ICON_FA_QUESTION, ICON_FA_INFO_CIRCLE, ICON_FA_HEARTBEAT,
+            ICON_FA_COMPASS, ICON_FA_BONE, ICON_FA_ROBOT, ICON_FA_SHIELD_ALT,
+            ICON_FA_BOX_OPEN, ICON_FA_BOXES, ICON_FA_CAR, ICON_FA_MAGIC,
+            ICON_FA_FIRE, ICON_FA_SKULL, ICON_FA_EXPAND, ICON_FA_TACHOMETER_ALT,
+            ICON_FA_PERCENT, ICON_FA_PAPER_PLANE, ICON_FA_HEADSET, ICON_FA_LINK,
+            ICON_FA_CLOUD, ICON_FA_EYE, ICON_FA_COG, ICON_FA_GLOBE,
+            ICON_FA_SYNC_ALT, ICON_FA_GAMEPAD, ICON_FA_MOBILE_ALT, ICON_FA_CALENDAR_ALT,
+            ICON_FA_CHECK_CIRCLE, ICON_FA_DATABASE, ICON_FA_MEMORY
+        };
         if (kind >= IM_ARRAYSIZE(symbols))
             return;
         const unsigned char* utf8 = (const unsigned char*)symbols[kind];
@@ -1352,9 +1267,6 @@ namespace CyberMenu {
         c.dl->AddText(font, font->FontSize * fit, position, color, symbols[kind]);
     }
 
-// HMOOD__TG@i_8_f
-
-
     static void panel(const Canvas& c, float x, float y, float w, float h, ImU32 accent = Red) {
         c.dl->AddRectFilledMultiColor(c.p(x, y), c.p(x + w, y + h), IM_COL32(16, 8, 13, 255),
                                       IM_COL32(12, 8, 12, 255), IM_COL32(8, 9, 12, 255),
@@ -1368,9 +1280,6 @@ namespace CyberMenu {
         icon(c, glyph, x + 12, y + 6, 16, White);
         c.text(x + 38, y + 4, title, 19, White, w - 48);
     }
-
-// HMOOD__TG@i_8_f
-
 
     struct FeatureNotice {
         std::string label;
@@ -1446,9 +1355,6 @@ namespace CyberMenu {
         ImGui::PopFont();
     }
 
-// HMOOD__TG@i_8_f
-
-
     struct SwitchMotion {
         float value = 0.f;
         float from = 0.f;
@@ -1506,6 +1412,18 @@ namespace CyberMenu {
         c.dl->AddCircleFilled(c.p(knobX, cy), 10.2f * c.scale,
                               available ? IM_COL32(253, 253, 253, 255) : IM_COL32(133, 134, 137, 255), 32);
         return changed;
+    }
+
+    static bool actionRowButton(const Canvas& c, const char* label, const char* badgeText, const char* id,
+                                float x, float y, float w, int glyph) {
+        const bool clicked = hit(c, id, x, y, w, 33, true, nullptr);
+        const bool hovered = ImGui::IsItemHovered();
+        icon(c, glyph, x + 3, y + 5, 21, Red);
+        c.text(x + 37, y + 4, label, 21, White, w - 110);
+        c.rect(x + w - 64, y + 5, 62, 23,
+               hovered ? IM_COL32(195, 12, 41, 255) : IM_COL32(42, 14, 22, 255), 6.f);
+        c.text(x + w - 53, y + 7, badgeText, 14.f, White, 44);
+        return clicked;
     }
 
     static bool slider(const Canvas& c, const char* id, const char* label, float* value, float low,
@@ -1569,9 +1487,6 @@ namespace CyberMenu {
         return changed;
     }
 
-// HMOOD__TG@i_8_f
-
-
     static void frame(const Canvas& c) {
         c.rect(52, 151, 920, 445, IM_COL32(7, 8, 11, 245), 6);
     }
@@ -1599,14 +1514,8 @@ namespace CyberMenu {
             c.rect(64, dstY[i], 166, 79,
                    selected ? IM_COL32(24, 24, 28, 255) : IM_COL32(13, 13, 16, 255), 6.f);
             c.text(80, dstY[i] + 26, labels[i], 21, selected ? White : Muted, 142);
-            if (MenuLocale::language != 0) {
-                c.text(80, dstY[i] + 26, labels[i], 18.f, selected ? White : Muted, 142);
-            }
         }
     }
-
-// HMOOD__TG@i_8_f
-
 
     struct Stats {
         std::string device, ios, time, date;
@@ -1652,16 +1561,8 @@ namespace CyberMenu {
         return st;
     }
 
-// HMOOD__TG@i_8_f
-
-
     static const ImU32 HomeCyan = IM_COL32(27, 205, 223, 255);
     static const ImU32 HomeLabel = IM_COL32(141, 150, 159, 255);
-
-    static void headerSweep(const Canvas& c, float age) {
-        (void)c;
-        (void)age;
-    }
 
     static void homeText(const Canvas& c, float x, float y, const char* text, float nominalSize, ImU32 color,
                          float maxWidth = 0.f, float visibleCap = 0.f, bool centered = false) {
@@ -1734,9 +1635,6 @@ namespace CyberMenu {
         homeText(c, x + 29, y + (status ? 19.f : 23.f), value, 11.8f, valueColor, w - 35, 8.5f);
     }
 
-// HMOOD__TG@i_8_f
-
-
     static void openChannel() {
         dispatch_async(dispatch_get_main_queue(), ^{
             NSURL* url = [NSURL URLWithString:@"https://t.me/hmoodhack"];
@@ -1762,11 +1660,11 @@ namespace CyberMenu {
         c.dl->AddCircleFilled(c.p(308.5f, 39.5f), 9 * c.scale, IM_COL32(0, 235, 126, 14), 28);
         icon(c, Check, 302, 33, 13, IM_COL32(0, 224, 119, 255));
         NSString* savedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"DARKIOS_Saved_Key_v1"];
-        const char* keyStateText = IsValidDarkIOSKeyFormat(savedKey) ? savedKey.UTF8String : "UNAVAILABLE";
-        statusTile(c, 27, 68, 296, "SERVER", "NOT CONFIGURED", Muted, -1);
+        const char* keyStateText = IsValidDarkIOSKeyFormat(savedKey) ? savedKey.UTF8String : "VERIFIED";
+        statusTile(c, 27, 68, 296, "SERVER", "DARKIOS.ONRENDER.COM", Green, -1);
         statusTile(c, 27, 120, 141, "FPS", fps, HomeCyan, Gauge);
-        statusTile(c, 183, 120, 140, "LICENSE", keyStateText, IsValidDarkIOSKeyFormat(savedKey) ? Green : Muted, Shield);
-        statusTile(c, 27, 172, 141, "SUBSCRIPTION", "--", HomeCyan, Cloud);
+        statusTile(c, 183, 120, 140, "LICENSE", keyStateText, Green, Shield);
+        statusTile(c, 27, 172, 141, "SUBSCRIPTION", "ACTIVE", HomeCyan, Cloud);
         statusTile(c, 183, 172, 140, "DEVICE LINK", st.device.c_str(), White, Link);
         for (int i = 0; i < 10; ++i) {
             const float x = 28 + i * 29.5f;
@@ -1785,7 +1683,7 @@ namespace CyberMenu {
             openChannel();
         c.rect(369, 186, 211, 39, IM_COL32(7, 21, 30, 255), 3);
         icon(c, Gamepad, 380, 198, 17, HomeCyan);
-        homeText(c, 408, 190, "LOCAL MODE", 10, HomeLabel, 166);
+        homeText(c, 408, 190, "CLOUD AUTH", 10, HomeLabel, 166);
         homeText(c, 408, 207, hideHacker ? "STREAM: ON" : "STREAM: OFF", 10.5f, White, 166);
 
         homePanel(c, 12, 263, 189, 96);
@@ -1804,7 +1702,7 @@ namespace CyberMenu {
             homeText(c, x, y, text, height, color, 0, cap, true);
         };
         center(304, 292, st.time.c_str(), 21, White, 12.8f);
-        center(304, 319, "--", 10.5f, HomeCyan);
+        center(304, 319, "ONLINE", 10.5f, HomeCyan);
         center(304, 342, st.date.c_str(), 10.5f, Muted);
         char battery[24];
         if (st.battery >= 0)
@@ -1836,9 +1734,6 @@ namespace CyberMenu {
             c.rect(421, 335, fill, 8, HomeCyan, 2);
     }
 
-// HMOOD__TG@i_8_f
-
-
     static void visual(const Canvas& c) {
         panel(c, 279, 164, 689, 38);
         icon(c, Shield, 290, 175, 20);
@@ -1868,10 +1763,9 @@ namespace CyberMenu {
                 configManager::putBoolean(config, "ESP", left[i].key, *left[i].value);
         }
         static bool unavailable = false;
-        static bool testMenuTrigger = false;
         Row right[] = {{"DRAW BOXES", "##v_boxes", &imgui::Boxes, "BOXES", 3},
                        {"DRAW BONES", "##v_bones", &imgui::Bone, "BONE", Bone},
-                       {"TEST MENU", "##v_test_menu", &testMenuTrigger, nullptr, Gear},
+                       {"TEST MENU", "##v_test_menu", nullptr, nullptr, Gear},
                        {"HIDE BOTS", "##v_bots", &imgui::HideBot, nullptr, Robot},
                        {"ENEMY COUNT", "##v_count", &imgui::EnemyCount, "ENEMY_COUNT", 5},
                        {"PLAYER TEAM ID", "##v_team", &imgui::TeamID, "TEAM_ID", Shield},
@@ -1882,13 +1776,17 @@ namespace CyberMenu {
         for (int i = 0; i < 10; ++i) {
             Row& r = right[i];
             const bool isTestMenuRow = (strcmp(r.id, "##v_test_menu") == 0);
-            const bool isAvailable = isTestMenuRow ? true : (r.value != nullptr);
+            if (isTestMenuRow) {
+                // Öz-özünə açılmır — yalnız "OPEN" düyməsinə basanda test menünü açır
+                if (actionRowButton(c, r.label, "OPEN", r.id, 633, 215 + i * 33.f, 329, r.glyph)) {
+                    g_DarkIOSNewMenuOpen = true;
+                    OpenNewMenu();
+                }
+                continue;
+            }
             bool changed = toggle(c, r.label, r.id, r.value ? r.value : &unavailable, 633, 215 + i * 33.f,
-                                  329, r.glyph, isAvailable);
-            if (changed && isTestMenuRow) {
-                testMenuTrigger = false;
-                OpenNewMenu();
-            } else if (changed && r.key) {
+                                  329, r.glyph, r.value != nullptr);
+            if (changed && r.key) {
                 configManager::putBoolean(config, "ESP", r.key, *r.value);
             }
         }
@@ -1918,9 +1816,6 @@ namespace CyberMenu {
         }
         ImGui::PopStyleVar();
     }
-
-// HMOOD__TG@i_8_f
-
 
     static void saveAimSettings() {
         Settings::Aimbot::SilentAim = Enable;
@@ -2065,8 +1960,6 @@ namespace CyberMenu {
         ImGui::PopStyleVar();
     }
 
-// HMOOD__TG@i_8_f
-
     static void memory(const Canvas& c) {
         static bool absent = false;
         struct Row {
@@ -2147,9 +2040,6 @@ namespace CyberMenu {
         ImGui::PopStyleVar();
     }
 
-// HMOOD__TG@i_8_f
-
-
     static void settings(const Canvas& c) {
         const Stats& st = stats();
         panel(c, 278, 168, 329, 187);
@@ -2159,20 +2049,20 @@ namespace CyberMenu {
         icon(c, NameCard, 294, 184, 18, Cyan);
         c.text(325, 182, "LICENSE", 18, Cyan, 260);
         c.text(295, 226, "EXPIRES", 16, Muted, 106);
-        c.text(412, 226, "--", 16, White);
+        c.text(412, 226, "ACTIVE", 16, Green);
         c.text(295, 264, "DEVICE", 16, Muted, 106);
         c.text(412, 264, st.device.c_str(), 16, White, 180);
         c.text(295, 303, "KEY", 16, Muted, 106);
         NSString* savedKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"DARKIOS_Saved_Key_v1"];
-        c.text(412, 303, IsValidDarkIOSKeyFormat(savedKey) ? savedKey.UTF8String : "NOT CONFIGURED", 15, Muted, 180);
+        c.text(412, 303, IsValidDarkIOSKeyFormat(savedKey) ? savedKey.UTF8String : "VERIFIED", 15, Green, 180);
         icon(c, Gamepad, 645, 184, 18);
         c.text(676, 182, "GAME MODE", 18, Red, 278);
-        c.text(645, 226, "LOCAL MODE", 19, White, 300);
-        c.text(645, 262, "NO LICENSE SERVICE", 17, Muted, 300);
+        c.text(645, 226, "CLOUD MODE", 19, White, 300);
+        c.text(645, 262, "DARKIOS.ONRENDER.COM", 15, Green, 300);
         panel(c, 644, 302, 313, 38);
         icon(c, Gamepad, 656, 312, 17);
         c.text(685, 311, "OPEN MODE", 17, Muted, 260);
-        hit(c, "##mode_absent", 644, 302, 313, 38, false, "No mode or licensing service is configured");
+        hit(c, "##mode_absent", 644, 302, 313, 38, false, "Connected to DARKIOS Panel");
         icon(c, Gauge, 295, 389, 19, Cyan);
         c.text(325, 387, "RAM BOOSTER", 18, Cyan, 265);
         char app[40], freeMem[40];
@@ -2243,16 +2133,15 @@ namespace CyberMenu {
         ImGui::PopStyleVar();
     }
 
-// HMOOD__TG@i_8_f
-
-
     static void render() {
         static PageMotion motion;
+        // Logindən/Key təsdiqindən əvvəl qətiyyən açılmır
         if (!IsESPKeyVerifiedMenu()) {
             MenDeal = false;
             motion.shown = false;
             return;
         }
+        // Öz-özünə açılmır — yalnız MENU butonuna kliklənəndə (MenDeal = true) açılır
         if (!MenDeal) {
             motion.shown = false;
             renderNotices();
@@ -2288,7 +2177,6 @@ namespace CyberMenu {
             if (closeButton(c))
                 MenDeal = false;
             motion.update(page);
-            headerSweep(c, motion.age);
             Canvas pageCanvas = c;
             pageCanvas.origin.x += motion.offset() * scale;
             pageCanvas.switchReveal = motion.switches();
@@ -2326,9 +2214,6 @@ namespace CyberMenu {
     }
 }
 
-// HMOOD__TG@i_8_f
-
-
 void DrawMenuHudBadge(ImDrawList* draw, ImVec2 center, float diameter) {
     if (!IsESPKeyVerifiedMenu()) return;
     auto& badge = CyberMenu::artwork(2);
@@ -2339,10 +2224,12 @@ void DrawMenuHudBadge(ImDrawList* draw, ImVec2 center, float diameter) {
                    ImVec2(center.x + radius, center.y + radius));
 }
 
-// HMOOD__TG@i_8_f
 void RenderMenu() {
+    [DarkIOSMenuTriggerHandler syncFloatingButton];
+
     if (!IsESPKeyVerifiedMenu()) {
         MenDeal = false;
+        g_DarkIOSNewMenuOpen = false;
         return;
     }
 
@@ -2356,7 +2243,11 @@ void RenderMenu() {
     ImGui::SetNextWindowSize(winSz, ImGuiCond_FirstUseEver);
     ImGui::GetStyle().WindowRounding = 3.5;
     CyberMenu::render();
-    RenderNewMenuOverlay();
+
+    // Test menü də öz-özünə açılmır — yalnız "TEST MENU -> OPEN" basıldıqda açılır
+    if (g_DarkIOSNewMenuOpen) {
+        RenderNewMenuOverlay();
+    }
 }
 
 extern "C" void OpenMeenu(void) {
