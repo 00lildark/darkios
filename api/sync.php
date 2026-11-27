@@ -83,6 +83,11 @@ function darkiosSyncMerge(array $current, array $incoming, array $deletedIds, st
                 if (empty($item['startedAt']) && !empty($existing['startedAt'])) {
                     $item['startedAt'] = $existing['startedAt'];
                 }
+                foreach (['udid', 'boundUdid'] as $uField) {
+                    if (empty($item[$uField]) && !empty($existing[$uField])) {
+                        $item[$uField] = $existing[$uField];
+                    }
+                }
                 $map[$uk] = array_merge($existing, $item);
             }
         } else {
