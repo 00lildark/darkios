@@ -1,853 +1,812 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
-#define LocalPlayer g_LocalPlayer
 
 #import <UIKit/UIKit.h>
-#import <Foundation/Foundation.h>
-#import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
-#import <objc/message.h>
-#import <dlfcn.h>
-#import <mach-o/dyld.h>
-#import <unistd.h>
+#import <Foundation/Foundation.h>
 
-#include <algorithm>
 #include <cmath>
-#include <cfloat>
 #include <vector>
 #include <string>
 #include <map>
+#include <algorithm>
 
-#import "Engine.h"
-#import "mahoa.h"
-#include "Tools.h"
-#import "PubgLoad.h"
-#include "imgui.h"
-#include "imgui_internal.h"
-#include "font_awesome_5.h"
-#include "fa_solid_900.h"
-#include "ini_rw.h"
-#include "menu.h"
+#include "PUBG/core/imgui/imgui.h"
+#include "PUBG/core/imgui/imgui_impl_metal.h"
+#include "gui/mywings/gui.hpp"
+#include "gui/trash/hashes.hpp"
+#include "gui/blur/blur.hpp"
+#include "gui/trash/bytes.hpp"
 
-#ifndef STR
-#define STR(str) (str)
-#endif
+#define STR(str) ENCRYPT(str)
 
 using namespace ImGui;
-using namespace SDK;
 
-#define ALPHA (ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_AlphaBar|ImGuiColorEditFlags_InputRGB|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoBorder)
-#define NO_ALPHA (ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_InputRGB|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoBorder)
-
-extern bool IsLogin;
-extern bool MenDeal;
-
-struct AimConfig {
-    bool enabled = false;
-    bool silent = false;
-    bool show_fov = false;
-    bool silent_show_fov = false;
-    bool prediction = false;
-    bool vis_check = false;
-    bool silent_vis_check = false;
-    bool grenade_warning = false;
-    bool vehicle_aim = false;
-    bool closest_priority = false;
-    float fov_size = 120.f;
-    float max_distance = 300.f;
-    float silent_distance = 300.f;
-    float smooth = 2.5f;
-    float silent_smooth = 1.0f;
-    float silent_fov = 90.f;
-    int target_bone = 0;
-    int trigger_mode = 0;
-    int silent_bone = 0;
-};
-
-struct VisConfig {
-    bool boxes = false;
-    bool health = false;
-    bool skeleton = false;
-    bool names = false;
-    bool distance = false;
-    bool snapline = false;
-    bool indicators = false;
-    bool indicator_fill = false;
-    float indicator_size = 20.f;
-    float indicator_width = 50.f;
-    float indicator_distance = 180.f;
-    bool self_skeleton = false;
-    bool draw_bots = false;
-    float line_width = 1.5f;
-    float box_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float skeleton_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float snapline_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float indicator_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float silent_color[4] = {1.f, 0.f, 0.f, 1.f};
-};
-
-struct ItemEspConfig {
-    bool vehicles = false;
-    bool metro_chests = false;
-    bool snow = false;
-    float max_distance = 200.f;
-};
-
-struct LootEspConfig {
-    bool enabled = false;
-    bool weapons = false;
-    bool attachments = false;
-    bool scopes = false;
-    bool ammo = false;
-    bool health = false;
-    bool backpacks = false;
-    bool helmets = false;
-    bool vests = false;
-    bool metro_items = false;
-    bool rare_only = false;
-    float max_distance = 150.f;
-};
-
-static AimConfig aim;
-static VisConfig vis;
-static ItemEspConfig itemEsp;
-static LootEspConfig lootEsp;
-
-static ASTExtraPlayerCharacter* g_LocalPlayer = nullptr;
-static ASTExtraPlayerController* g_PlayerController = nullptr;
-static UFont* tslFont = nullptr;
-static int enemyCount = 0;
 static bool menu_open = false;
+static bool ui_initialized = false;
 
-static void (*orig_shoot_event)(USTExtraShootWeaponComponent*, FVector, FRotator, ASTExtraShootWeapon*, int) = nullptr;
-static void (*orig_throw_grenade)(ASTExtraWeapon*, FVector, FRotator) = nullptr;
-static void (*orig_shoot_underbarrel)(ASTExtraWeapon*, FVector, FRotator) = nullptr;
-static void (*orig_process_event)(UObject*, UFunction*, void*) = nullptr;
+// UI-only settings. These values do not invoke game functions.
+namespace SilenticumUI {
 
-static inline bool IsValidPtr(const void* p) {
-    uintptr_t addr = (uintptr_t)p;
-    return addr >= 0x100000000ULL && addr < 0x2000000000ULL;
-}
+    struct AimSettings {
+        bool enabled = false;
+        bool show_fov = false;
+        bool silent = false;
+        bool silent_show_fov = false;
+        bool prediction = false;
+        bool vis_check = false;
+        bool silent_vis_check = false;
+        bool grenade_warning = false;
+        bool vehicle_aim = false;
+        bool closest_priority = false;
 
-static inline FString MakeFString(const wchar_t* ws) {
-    return FString(ws ? ws : L"");
-}
+        float fov_size = 120.0f;
+        float max_distance = 300.0f;
+        float silent_distance = 300.0f;
+        float smooth = 2.5f;
+        float silent_smooth = 1.0f;
+        float silent_fov = 90.0f;
 
-static inline FString MakeFString(const std::wstring& ws) {
-    return FString(ws.c_str());
-}
-
-static std::wstring FStringToWStringSafe(const FString& fs) {
-    @try {
-        int32_t n = fs.Num();
-        const wchar_t* ptr = fs.GetData();
-        if (n > 0 && n < 128 && IsValidPtr(ptr)) {
-            return std::wstring(ptr, (size_t)n - (ptr[n - 1] == L'\0' ? 1 : 0));
-        }
-    } @catch (...) {}
-    return L"player";
-}
-
-static uint64_t getBaseAddress(const char* n) {
-    for (int i = 0; i < (int)_dyld_image_count(); i++) {
-        const char* name = _dyld_get_image_name(i);
-        if (name && strstr(name, n)) {
-            return (uint64_t)_dyld_get_image_vmaddr_slide(i);
-        }
-    }
-    return 0;
-}
-
-static uint64_t getRealOffset(uint64_t o) {
-    uint64_t slide = getBaseAddress(ENCRYPT("ShadowTrackerExtra"));
-    return slide ? (slide + o) : 0;
-}
-
-static FUObjectArray* ResolveGUObjectArray(void) {
-    @try {
-        uint64_t symAddr = getRealOffset(0x10A7F93E0);
-        if (!IsValidPtr((const void*)symAddr)) return nullptr;
-        FUObjectArray* direct = (FUObjectArray*)symAddr;
-        if (IsValidPtr(direct) && direct->ObjObjects.Num() > 0 && direct->ObjObjects.Num() < 5000000) {
-            return direct;
-        }
-        FUObjectArray* deref = *(FUObjectArray**)symAddr;
-        if (IsValidPtr(deref) && deref->ObjObjects.Num() > 0 && deref->ObjObjects.Num() < 5000000) {
-            return deref;
-        }
-    } @catch (...) {}
-    return nullptr;
-}
-
-static TNameEntryArray* GetGlobalNames(void) {
-    @try {
-        uint64_t fnAddr = getRealOffset(0x105014128);
-        if (!IsValidPtr((const void*)fnAddr)) return nullptr;
-        return ((TNameEntryArray*(*)())fnAddr)();
-    } @catch (...) {
-        return nullptr;
-    }
-}
-
-static UWorld* GEWorld = nullptr;
-static int GWorldNum = 0;
-
-static UWorld* GetFullWorld(void) {
-    @try {
-        if (!IsValidPtr(UObject::GUObjectArray)) return nullptr;
-        auto& objs = UObject::GUObjectArray->ObjObjects;
-        int total = objs.Num();
-        if (total <= 0 || total > 5000000) return nullptr;
-
-        if (GWorldNum > 0 && GWorldNum < total) {
-            @try {
-                auto e = (UEngine*)objs.GetByIndex(GWorldNum);
-                if (IsValidPtr(e)) {
-                    if (!tslFont && IsValidPtr(e->MediumFont)) tslFont = e->MediumFont;
-                    auto v = e->GameViewport;
-                    if (IsValidPtr(v) && IsValidPtr(v->World)) {
-                        GEWorld = v->World;
-                        return v->World;
-                    }
-                }
-            } @catch (...) {
-                GWorldNum = 0;
-            }
-        }
-
-        for (int i = 0; i < total; i++) {
-            @try {
-                auto o = objs.GetByIndex(i);
-                if (IsValidPtr(o) && o->IsA(UEngine::StaticClass())) {
-                    auto e = (UEngine*)o;
-                    if (IsValidPtr(e->GameViewport)) {
-                        if (IsValidPtr(e->MediumFont)) tslFont = e->MediumFont;
-                        auto v = e->GameViewport;
-                        if (IsValidPtr(v->World)) {
-                            GEWorld = v->World;
-                            GWorldNum = i;
-                            return v->World;
-                        }
-                    }
-                }
-            } @catch (...) {}
-        }
-    } @catch (...) {}
-    return nullptr;
-}
-
-template<class T>
-static void GetAllActorsInGame(std::vector<T*>& a) {
-    @try {
-        auto w = GetFullWorld();
-        if (!IsValidPtr(w)) return;
-        auto s = (UGameplayStatics*)UGameplayStatics::StaticClass();
-        if (!IsValidPtr(s)) return;
-        TArray<AActor*> arr;
-        s->GetAllActorsOfClass((UObject*)w, T::StaticClass(), &arr);
-        int n = arr.Num();
-        if (n <= 0 || n > 20000) return;
-        for (int i = 0; i < n; i++) {
-            @try {
-                if (IsValidPtr(arr[i])) a.push_back((T*)arr[i]);
-            } @catch (...) {}
-        }
-    } @catch (...) {}
-}
-
-static float FVectorSize(const FVector& v) {
-    return sqrtf(v.X * v.X + v.Y * v.Y + v.Z * v.Z);
-}
-
-static void NormalizeAngles(FRotator& a) {
-    while (a.Pitch > 180) a.Pitch -= 360;
-    while (a.Pitch < -180) a.Pitch += 360;
-    if (a.Pitch > 89) a.Pitch = 89;
-    if (a.Pitch < -89) a.Pitch = -89;
-    while (a.Yaw > 180) a.Yaw -= 360;
-    while (a.Yaw < -180) a.Yaw += 360;
-    a.Roll = 0;
-}
-
-static FVector GetCameraLocation(ASTExtraPlayerController* pc) {
-    @try {
-        if (IsValidPtr(pc) && IsValidPtr(pc->PlayerCameraManager)) {
-            return pc->PlayerCameraManager->CameraCache.POV.Location;
-        }
-    } @catch (...) {}
-    return FVector();
-}
-
-static FRotator GetCameraRotation(ASTExtraPlayerController* pc) {
-    @try {
-        if (IsValidPtr(pc) && IsValidPtr(pc->PlayerCameraManager)) {
-            return pc->PlayerCameraManager->CameraCache.POV.Rotation;
-        }
-    } @catch (...) {}
-    return FRotator();
-}
-
-static void DrawLine(AHUD* h, FVector2D a, FVector2D b, float t, FLinearColor c) {
-    @try {
-        if (IsValidPtr(h) && IsValidPtr(h->Canvas)) h->Canvas->K2_DrawLine(a, b, t, c);
-    } @catch (...) {}
-}
-
-static void DrawTriangleIndicatorCanvas(AHUD* h, float cx, float cy, float hgt, float wd, float angle, FLinearColor col, bool fill) {
-    @try {
-        if (!IsValidPtr(h) || !IsValidPtr(h->Canvas)) return;
-        float p1x = cx + hgt * cosf(angle);
-        float p1y = cy + hgt * sinf(angle);
-        float p2x = cx + wd * cosf(angle + 1.8f);
-        float p2y = cy + wd * sinf(angle + 1.8f);
-        float p3x = cx + wd * cosf(angle - 1.8f);
-        float p3y = cy + wd * sinf(angle - 1.8f);
-        if (fill) {
-            float minX = std::min({p1x, p2x, p3x});
-            float maxX = std::max({p1x, p2x, p3x});
-            float minY = std::min({p1y, p2y, p3y});
-            float maxY = std::max({p1y, p2y, p3y});
-            for (int px = (int)minX; px <= (int)maxX; px++) {
-                for (int py = (int)minY; py <= (int)maxY; py++) {
-                    float d1 = (p2x - p1x) * (py - p1y) - (p2y - p1y) * (px - p1x);
-                    float d2 = (p3x - p2x) * (py - p2y) - (p3y - p2y) * (px - p2x);
-                    float d3 = (p1x - p3x) * (py - p3y) - (p1y - p3y) * (px - p3x);
-                    if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) {
-                        h->Canvas->K2_DrawLine(FVector2D((float)px, (float)py), FVector2D((float)(px + 1), (float)py), 1.f, col);
-                    }
-                }
-            }
-        } else {
-            h->Canvas->K2_DrawLine(FVector2D(p1x, p1y), FVector2D(p2x, p2y), 1.5f, col);
-            h->Canvas->K2_DrawLine(FVector2D(p2x, p2y), FVector2D(p3x, p3y), 1.5f, col);
-            h->Canvas->K2_DrawLine(FVector2D(p3x, p3y), FVector2D(p1x, p1y), 1.5f, col);
-        }
-    } @catch (...) {}
-}
-
-static void DrawFOVCircle(AHUD* h, int x, int y, int r, FLinearColor c) {
-    if (!IsValidPtr(h) || !IsValidPtr(h->Canvas)) return;
-    float s = (float)(M_PI * 2.0 / 32.0);
-    for (float a = 0; a < (float)(M_PI * 2.0); a += s) {
-        h->Canvas->K2_DrawLine(
-            FVector2D(r * cosf(a) + x, r * sinf(a) + y),
-            FVector2D(r * cosf(a + s) + x, r * sinf(a + s) + y),
-            1.f, c);
-    }
-}
-
-static void DrawText(AHUD* h, FString t, FVector2D p, FLinearColor c, bool cx) {
-    @try {
-        if (IsValidPtr(h) && IsValidPtr(h->Canvas) && IsValidPtr(tslFont)) {
-            h->Canvas->K2_DrawText(tslFont, t, p, c, 1.f, FLinearColor(0, 0, 0, 0), FVector2D(0, 0), cx, false, false, FLinearColor(0, 0, 0, 0));
-        }
-    } @catch (...) {}
-}
-
-static void DrawSkeleton(AHUD* h, ASTExtraPlayerCharacter* pl, ASTExtraPlayerController* pc, UGameplayStatics* s, FLinearColor c) {
-    @try {
-        if (!IsValidPtr(pl) || !IsValidPtr(pl->Mesh) || !IsValidPtr(s) || !IsValidPtr(pc)) return;
-        const char* n[] = {"Head", "neck_01", "spine_03", "spine_02", "spine_01", "pelvis", "upperarm_r", "lowerarm_r", "hand_r", "upperarm_l", "lowerarm_l", "hand_l", "thigh_r", "calf_r", "foot_r", "thigh_l", "calf_l", "foot_l"};
-        FVector2D p[18];
-        bool ok[18] = {};
-        for (int i = 0; i < 18; i++) {
-            FVector w = pl->GetBonePos(n[i], FVector(0, 0, 0));
-            if (s->ProjectWorldToScreen(pc, w, false, &p[i])) ok[i] = true;
-        }
-        int conn[17][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 4}, {4, 5}, {1, 6}, {6, 7}, {7, 8}, {1, 9}, {9, 10}, {10, 11}, {5, 12}, {12, 13}, {13, 14}, {5, 15}, {15, 16}, {16, 17}};
-        for (auto& pr : conn) {
-            if (ok[pr[0]] && ok[pr[1]]) DrawLine(h, p[pr[0]], p[pr[1]], vis.line_width, c);
-        }
-    } @catch (...) {}
-}
-
-static ASTExtraPlayerCharacter* FindBestTarget(float fov, float maxD, int bone, bool checkVis, bool closestFirst, FRotator& outRot) {
-    @try {
-        if (!IsValidPtr(g_LocalPlayer) || !IsValidPtr(g_PlayerController) || !IsValidPtr(g_PlayerController->PlayerCameraManager)) return nullptr;
-        std::vector<ASTExtraPlayerCharacter*> p;
-        GetAllActorsInGame(p);
-        ASTExtraPlayerCharacter* best = nullptr;
-        float bestVal = FLT_MAX;
-        FVector camLoc = GetCameraLocation(g_PlayerController);
-        FRotator camRot = GetCameraRotation(g_PlayerController);
-        for (auto e : p) {
-            if (!IsValidPtr(e) || !IsValidPtr(e->RootComponent) || e->GetCurrentVehicle() || e->PlayerKey == g_LocalPlayer->PlayerKey || e->TeamID == g_LocalPlayer->TeamID || e->bDead || e->bHidden) continue;
-            if (!vis.draw_bots && e->bEnsure) continue;
-            float dist = e->GetDistanceTo(g_LocalPlayer) / 100.f;
-            if (dist > maxD) continue;
-            const char* bn = bone == 0 ? "Head" : (bone == 1 ? "neck_01" : (bone == 2 ? "spine_03" : "pelvis"));
-            FVector bp = e->GetBonePos(bn, FVector(0, 0, 0));
-            if (checkVis && !g_PlayerController->LineOfSightTo(e, bp, true)) continue;
-            FVector dir = bp - camLoc;
-            FRotator tr = UKismetMathLibrary::Conv_VectorToRotator(dir);
-            NormalizeAngles(tr);
-            float da = sqrtf(powf(tr.Pitch - camRot.Pitch, 2) + powf(tr.Yaw - camRot.Yaw, 2));
-            if (da > fov) continue;
-            float val = closestFirst ? dist : da;
-            if (val < bestVal) {
-                bestVal = val;
-                best = e;
-                outRot = tr;
-            }
-        }
-        return best;
-    } @catch (...) {
-        return nullptr;
-    }
-}
-
-static float GetBulletSpeed(void) {
-    @try {
-        if (!IsValidPtr(g_LocalPlayer)) return 800;
-        float bs = 800;
-        auto wm = g_LocalPlayer->WeaponManagerComponent;
-        if (IsValidPtr(wm)) {
-            auto cw = (ASTExtraShootWeapon*)wm->CurrentWeaponReplicated;
-            if (IsValidPtr(cw) && IsValidPtr(cw->ShootWeaponEntityComp)) {
-                bs = cw->ShootWeaponEntityComp->BulletFireSpeed;
-            }
-        }
-        return bs > 1.f ? bs : 800;
-    } @catch (...) {
-        return 800;
-    }
-}
-
-static void PredictTarget(FVector& tp, ASTExtraPlayerCharacter* t, FVector origin) {
-    @try {
-        if (!IsValidPtr(t)) return;
-        FVector vel = t->GetVelocity();
-        ASTExtraVehicleBase* v = t->GetCurrentVehicle();
-        if (IsValidPtr(v)) {
-            FVector vv = v->GetVelocity();
-            if (FVectorSize(vv) > 0) vel = vv;
-        }
-        float bs = GetBulletSpeed();
-        float dist = FVectorSize(tp - origin);
-        float tt = dist / bs;
-        tp.X += vel.X * tt;
-        tp.Y += vel.Y * tt;
-        tp.Z += vel.Z * tt;
-    } @catch (...) {}
-}
-
-static bool HasWeaponEquipped(void) {
-    @try {
-        if (!IsValidPtr(g_LocalPlayer)) return false;
-        auto wm = g_LocalPlayer->WeaponManagerComponent;
-        if (!IsValidPtr(wm)) return false;
-        int slotVal = (int)wm->GetCurrentUsingPropSlot().GetValue();
-        return (slotVal >= 1 && slotVal <= 3);
-    } @catch (...) {
-        return false;
-    }
-}
-
-static void HookedShootEvent(USTExtraShootWeaponComponent* c, FVector s, FRotator r, ASTExtraShootWeapon* w, int u) {
-    @try {
-        FRotator tr;
-        ASTExtraPlayerCharacter* t = FindBestTarget(aim.silent_fov, aim.silent_distance, aim.silent_bone, aim.silent_vis_check, false, tr);
-        if (!t || !aim.silent || !IsValidPtr(g_PlayerController)) {
-            if (orig_shoot_event) orig_shoot_event(c, s, r, w, u);
-            return;
-        }
-        FVector tp = (aim.silent_bone == 0) ? t->GetBonePos("Head", FVector(0, 0, 0)) : t->GetBonePos(aim.silent_bone == 1 ? "neck_01" : (aim.silent_bone == 2 ? "spine_03" : "pelvis"), FVector(0, 0, 0));
-        if (aim.prediction) PredictTarget(tp, t, s);
-        FRotator nr = UKismetMathLibrary::Conv_VectorToRotator(tp - s);
-        NormalizeAngles(nr);
-        if (orig_shoot_event) orig_shoot_event(c, s, nr, w, u);
-    } @catch (...) {
-        if (orig_shoot_event) orig_shoot_event(c, s, r, w, u);
-    }
-}
-
-static void HookedThrowGrenade(ASTExtraWeapon* w, FVector s, FRotator r) {
-    @try {
-        FRotator tr;
-        ASTExtraPlayerCharacter* t = FindBestTarget(aim.silent_fov, aim.silent_distance, aim.silent_bone, aim.silent_vis_check, false, tr);
-        if (!t || !aim.silent || !IsValidPtr(g_PlayerController)) {
-            if (orig_throw_grenade) orig_throw_grenade(w, s, r);
-            return;
-        }
-        FVector tp = t->K2_GetActorLocation();
-        if (aim.prediction) {
-            FVector vel = t->GetVelocity();
-            float tt = FVectorSize(tp - s) / 15.f;
-            tp.X += vel.X * tt;
-            tp.Y += vel.Y * tt;
-            tp.Z += vel.Z * tt;
-        }
-        FVector d = tp - GetCameraLocation(g_PlayerController);
-        d.Z += 150;
-        FRotator nr = UKismetMathLibrary::Conv_VectorToRotator(d);
-        NormalizeAngles(nr);
-        if (orig_throw_grenade) orig_throw_grenade(w, s, nr);
-    } @catch (...) {
-        if (orig_throw_grenade) orig_throw_grenade(w, s, r);
-    }
-}
-
-static void HookedShootUnderbarrel(ASTExtraWeapon* w, FVector s, FRotator r) {
-    @try {
-        FRotator tr;
-        ASTExtraPlayerCharacter* t = FindBestTarget(aim.silent_fov, aim.silent_distance, aim.silent_bone, aim.silent_vis_check, false, tr);
-        if (!t || !aim.silent || !IsValidPtr(g_PlayerController)) {
-            if (orig_shoot_underbarrel) orig_shoot_underbarrel(w, s, r);
-            return;
-        }
-        FVector tp = t->K2_GetActorLocation();
-        if (aim.prediction) {
-            FVector vel = t->GetVelocity();
-            float tt = FVectorSize(tp - s) / 75.f;
-            tp.X += vel.X * tt;
-            tp.Y += vel.Y * tt;
-            tp.Z += vel.Z * tt;
-        }
-        FVector d = tp - GetCameraLocation(g_PlayerController);
-        d.Z += 50;
-        FRotator nr = UKismetMathLibrary::Conv_VectorToRotator(d);
-        NormalizeAngles(nr);
-        if (orig_shoot_underbarrel) orig_shoot_underbarrel(w, s, nr);
-    } @catch (...) {
-        if (orig_shoot_underbarrel) orig_shoot_underbarrel(w, s, r);
-    }
-}
-
-static void RenderESP(AHUD* hud, int w, int h) {
-    @try {
-        if (!IsValidPtr(hud) || !IsValidPtr(hud->Canvas)) return;
-        auto s = (UGameplayStatics*)UGameplayStatics::StaticClass();
-        auto world = GetFullWorld();
-        if (!IsValidPtr(s) || !IsValidPtr(world)) return;
-
-        ASTExtraPlayerController* pc = nullptr;
-        if (IsValidPtr(world->NetDriver) && IsValidPtr(world->NetDriver->ServerConnection)) {
-            pc = (ASTExtraPlayerController*)world->NetDriver->ServerConnection->PlayerController;
-        }
-        if (!IsValidPtr(pc) || !IsValidPtr(pc->PlayerCameraManager)) return;
-
-        std::vector<ASTExtraPlayerCharacter*> pl;
-        GetAllActorsInGame(pl);
-        ASTExtraPlayerCharacter* lp = nullptr;
-        for (auto p : pl) {
-            if (IsValidPtr(p) && p->PlayerKey == pc->PlayerKey) {
-                lp = p;
-                break;
-            }
-        }
-        if (!IsValidPtr(lp) || !IsValidPtr(lp->RootComponent)) return;
-        g_LocalPlayer = lp;
-        g_PlayerController = pc;
-        bool hasWeapon = HasWeaponEquipped();
-
-        if (vis.self_skeleton) DrawSkeleton(hud, lp, pc, s, FLinearColor(1, 1, 1, 0.5f));
-
-        if (aim.grenade_warning) {
-            std::vector<ASTExtraGrenadeBase*> gs;
-            GetAllActorsInGame(gs);
-            for (auto g : gs) {
-                if (!IsValidPtr(g) || !IsValidPtr(g->RootComponent) || g->bHidden || g->GetDistanceTo(lp) / 100.f > 15) continue;
-                if (!g->HasBeenThrowedOut()) continue;
-                FVector2D sp;
-                if (s->ProjectWorldToScreen(pc, g->K2_GetActorLocation(), false, &sp)) {
-                    int id = g->ItemDefineID.TypeSpecificID;
-                    std::wstring nm = (id == 602002) ? L"smoke" : (id == 602003) ? L"fire" : (id == 602004 || id == 602005) ? L"nade" : L"grenade";
-                    if (g->GetDistanceTo(lp) / 100.f < 10 && IsValidPtr(tslFont)) {
-                        tslFont->LegacyFontSize = 22;
-                        DrawText(hud, MakeFString(nm + L" near"), FVector2D(w / 2.f, h - 40.f), FLinearColor(1, 0, 0, 1), true);
-                    }
-                    if (IsValidPtr(tslFont)) {
-                        tslFont->LegacyFontSize = 11;
-                        DrawText(hud, MakeFString(nm), FVector2D(sp.X, sp.Y - 18), FLinearColor(1, 1, 1, 1), true);
-                    }
-                    DrawFOVCircle(hud, (int)sp.X, (int)sp.Y, 12, FLinearColor(1, 0, 0, 0.6f));
-                }
-            }
-        }
-
-        enemyCount = 0;
-        for (auto e : pl) {
-            if (!IsValidPtr(e) || (!vis.draw_bots && e->bEnsure) || e->PlayerKey == lp->PlayerKey || e->TeamID == lp->TeamID || e->bDead || e->bHidden) continue;
-            enemyCount++;
-            float dist = e->GetDistanceTo(lp) / 100.f;
-            if (dist > 400 || !IsValidPtr(e->Mesh) || !IsValidPtr(e->RootComponent)) continue;
-            bool visb = pc->LineOfSightTo(e, FVector(0, 0, 0), true);
-            float hp = e->HealthMax > 0 ? (e->Health / e->HealthMax) : 0.f;
-            FLinearColor hpCol = visb ? (hp > 0.6f ? FLinearColor(0, 1, 0, 1) : (hp > 0.3f ? FLinearColor(1, 1, 0, 1) : FLinearColor(1, 0, 0, 1))) : FLinearColor(1, 1, 1, 1);
-            FVector head = e->GetBonePos("Head", FVector(0, 0, 0));
-            FVector foot = e->GetBonePos("foot_l", FVector(0, 0, 0));
-            head.Z += 10;
-            FVector2D hs, fs;
-            if (s->ProjectWorldToScreen(pc, head, false, &hs) && s->ProjectWorldToScreen(pc, foot, false, &fs)) {
-                float bh = fabsf(hs.Y - fs.Y);
-                if (bh < 1) continue;
-                float bw = bh * 0.52f;
-                float bx = hs.X - bw / 2;
-                float by = hs.Y;
-                FLinearColor skelCol = FLinearColor(vis.skeleton_color[0], vis.skeleton_color[1], vis.skeleton_color[2], vis.skeleton_color[3]);
-                if (!visb) skelCol = FLinearColor(0.3f, 0.3f, 0.3f, 1);
-                if (vis.skeleton) DrawSkeleton(hud, e, pc, s, skelCol);
-                if (vis.health) {
-                    float barW = 40, barH = 5;
-                    DrawLine(hud, FVector2D(hs.X - barW / 2 - 1, by - 12), FVector2D(hs.X + barW / 2 + 1, by - 12), barH + 2, FLinearColor(0, 0, 0, 1));
-                    if (hp > 0) DrawLine(hud, FVector2D(hs.X - barW / 2, by - 12), FVector2D(hs.X - barW / 2 + barW * hp, by - 12), barH, hpCol);
-                }
-                if (vis.snapline) {
-                    DrawLine(hud, FVector2D(w / 2.f, 135), FVector2D(hs.X, by - 20), vis.line_width, FLinearColor(vis.snapline_color[0], vis.snapline_color[1], vis.snapline_color[2], vis.snapline_color[3]));
-                }
-                if (vis.boxes) {
-                    float lw = vis.line_width;
-                    float bo = lw * 1.5f;
-                    FLinearColor bc = FLinearColor(vis.box_color[0], vis.box_color[1], vis.box_color[2], vis.box_color[3]);
-                    DrawLine(hud, FVector2D(bx - bo, by - bo), FVector2D(bx + bw + bo, by - bo), bo, FLinearColor(0, 0, 0, 1));
-                    DrawLine(hud, FVector2D(bx - bo, by + bh + bo), FVector2D(bx + bw + bo, by + bh + bo), bo, FLinearColor(0, 0, 0, 1));
-                    DrawLine(hud, FVector2D(bx - bo, by - bo), FVector2D(bx - bo, by + bh + bo), bo, FLinearColor(0, 0, 0, 1));
-                    DrawLine(hud, FVector2D(bx + bw + bo, by - bo), FVector2D(bx + bw + bo, by + bh + bo), bo, FLinearColor(0, 0, 0, 1));
-                    DrawLine(hud, FVector2D(bx, by), FVector2D(bx + bw, by), lw, bc);
-                    DrawLine(hud, FVector2D(bx, by + bh), FVector2D(bx + bw, by + bh), lw, bc);
-                    DrawLine(hud, FVector2D(bx, by), FVector2D(bx, by + bh), lw, bc);
-                    DrawLine(hud, FVector2D(bx + bw, by), FVector2D(bx + bw, by + bh), lw, bc);
-                }
-                if (IsValidPtr(tslFont)) {
-                    if (vis.names) {
-                        tslFont->LegacyFontSize = 13;
-                        std::wstring nm = e->bEnsure ? L"bot" : FStringToWStringSafe(e->PlayerName);
-                        DrawText(hud, MakeFString(nm), FVector2D(hs.X, by + bh + 4), FLinearColor(1, 1, 1, 1), true);
-                    }
-                    if (vis.distance) {
-                        tslFont->LegacyFontSize = 11;
-                        DrawText(hud, MakeFString(std::to_wstring((int)dist) + L"m"), FVector2D(hs.X, by + bh + 18), FLinearColor(1, 1, 1, 1), true);
-                    }
-                }
-            }
-            if (vis.indicators) {
-                FVector ePos = e->K2_GetActorLocation();
-                FVector lPos = lp->K2_GetActorLocation();
-                FVector dir = ePos - lPos;
-                float yaw = atan2f(dir.Y, dir.X);
-                float a = yaw - pc->PlayerCameraManager->CameraCache.POV.Rotation.Yaw * 0.0174533f;
-                float x = w / 2.f + vis.indicator_distance * sinf(a);
-                float y = h / 2.f - vis.indicator_distance * cosf(a);
-                float isz = vis.indicator_size;
-                x = std::clamp(x, isz + 10.f, w - isz - 10.f);
-                y = std::clamp(y, isz + 10.f, h - isz - 10.f);
-                float angleToCenter = atan2f(y - h / 2.f, x - w / 2.f);
-                DrawTriangleIndicatorCanvas(hud, x, y, isz, vis.indicator_width, angleToCenter, FLinearColor(vis.indicator_color[0], vis.indicator_color[1], vis.indicator_color[2], vis.indicator_color[3]), vis.indicator_fill);
-                if (IsValidPtr(tslFont)) {
-                    tslFont->LegacyFontSize = 12;
-                    DrawText(hud, MakeFString(std::to_wstring((int)dist) + L"m"), FVector2D(x, y + isz + 4), FLinearColor(1, 1, 1, 1), true);
-                }
-            }
-        }
-        if (IsValidPtr(tslFont)) {
-            tslFont->LegacyFontSize = 26;
-            DrawText(hud, MakeFString(std::to_wstring(enemyCount)), FVector2D(w / 2.f, 85), FLinearColor(1, 1, 1, 1), true);
-            tslFont->LegacyFontSize = 13;
-        }
-        if (aim.show_fov) DrawFOVCircle(hud, w / 2, h / 2, (int)aim.fov_size, FLinearColor(1, 1, 1, 0.3f));
-        if (aim.silent_show_fov) DrawFOVCircle(hud, w / 2, h / 2, (int)aim.silent_fov, FLinearColor(1, 0, 0, 0.3f));
-        if (aim.enabled && hasWeapon && IsValidPtr(g_LocalPlayer) && IsValidPtr(g_PlayerController)) {
-            FRotator tr;
-            ASTExtraPlayerCharacter* t = FindBestTarget(aim.fov_size, aim.max_distance, aim.target_bone, false, true, tr);
-            if (IsValidPtr(t)) {
-                bool visb = g_PlayerController->LineOfSightTo(t, FVector(0, 0, 0), true);
-                const char* bn = aim.target_bone == 0 ? "Head" : (aim.target_bone == 1 ? "neck_01" : (aim.target_bone == 2 ? "spine_03" : "pelvis"));
-                FVector tp = t->GetBonePos(bn, FVector(0, 0, 0));
-                FVector camPos = GetCameraLocation(g_PlayerController);
-                if (aim.prediction) PredictTarget(tp, t, camPos);
-                FRotator targetRot = UKismetMathLibrary::Conv_VectorToRotator(tp - camPos);
-                NormalizeAngles(targetRot);
-                FVector2D ts;
-                if (visb && s->ProjectWorldToScreen(g_PlayerController, tp, false, &ts)) {
-                    DrawLine(hud, FVector2D(w / 2.f, h / 2.f), ts, vis.line_width, FLinearColor(vis.snapline_color[0], vis.snapline_color[1], vis.snapline_color[2], vis.snapline_color[3]));
-                }
-                if (visb) {
-                    FRotator camRot = g_PlayerController->PlayerCameraManager->CameraCache.POV.Rotation;
-                    float pitchDiff = targetRot.Pitch - camRot.Pitch;
-                    float yawDiff = targetRot.Yaw - camRot.Yaw;
-                    while (yawDiff > 180) yawDiff -= 360;
-                    while (yawDiff < -180) yawDiff += 360;
-                    float sVal = fmaxf(aim.smooth, 1.0f);
-                    g_LocalPlayer->AddControllerYawInput(yawDiff / sVal);
-                    g_LocalPlayer->AddControllerPitchInput(pitchDiff / sVal);
-                }
-            }
-        }
-    } @catch (...) {}
-}
-
-static void HookedProcessEvent(UObject* o, UFunction* f, void* a) {
-    @try {
-        if (IsValidPtr(o) && IsValidPtr(f) && IsValidPtr(a)) {
-            std::string fn = f->GetFullName();
-            if (fn.find(ENCRYPT("Function Engine.HUD.ReceiveDrawHUD")) != std::string::npos) {
-                if (o->IsA(AHUD::StaticClass())) {
-                    auto h = (AHUD*)o;
-                    auto p = (AHUD_ReceiveDrawHUD_Params*)a;
-                    if (p->SizeX > 0 && p->SizeY > 0) {
-                        RenderESP(h, p->SizeX, p->SizeY);
-                    }
-                }
-            }
-        }
-        if (orig_process_event) orig_process_event(o, f, a);
-    } @catch (...) {
-        if (orig_process_event) orig_process_event(o, f, a);
-    }
-}
-
-extern "C" void RenderNewMenuOverlay(void) {
-    if (!menu_open) return;
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.DisplaySize.x < 1.f || io.DisplaySize.y < 1.f) return;
-
-    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f - 230.f, io.DisplaySize.y * 0.5f - 180.f),
-                            ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(460.f, 360.f), ImGuiCond_FirstUseEver);
-
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.04f, 0.96f));
-    ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.08f, 0.08f, 0.08f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
-
-    bool openFlag = menu_open;
-    if (ImGui::Begin("TEST MENU", &openFlag, ImGuiWindowFlags_NoCollapse)) {
-        if (ImGui::BeginTabBar("##test_menu_tabs")) {
-            if (ImGui::BeginTabItem("ESP")) {
-                ImGui::Checkbox("Boxes", &vis.boxes);
-                ImGui::Checkbox("Health", &vis.health);
-                ImGui::Checkbox("Skeleton", &vis.skeleton);
-                ImGui::Checkbox("Self Skeleton", &vis.self_skeleton);
-                ImGui::Checkbox("Names", &vis.names);
-                ImGui::Checkbox("Distance", &vis.distance);
-                ImGui::Checkbox("Snapline", &vis.snapline);
-                ImGui::Checkbox("Indicators", &vis.indicators);
-                ImGui::Checkbox("Draw Bots", &vis.draw_bots);
-                ImGui::SliderFloat("Line Width", &vis.line_width, 0.5f, 5.0f, "%.1f");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Aimbot")) {
-                ImGui::Checkbox("Enable Aimbot", &aim.enabled);
-                ImGui::Checkbox("Silent Aim", &aim.silent);
-                ImGui::Checkbox("Show FOV", &aim.show_fov);
-                ImGui::Checkbox("Silent Show FOV", &aim.silent_show_fov);
-                ImGui::Checkbox("Prediction", &aim.prediction);
-                ImGui::Checkbox("Visibility Check", &aim.vis_check);
-                ImGui::Checkbox("Grenade Warning", &aim.grenade_warning);
-                ImGui::SliderFloat("FOV Size", &aim.fov_size, 20.f, 400.f, "%.0f");
-                ImGui::SliderFloat("Max Distance", &aim.max_distance, 50.f, 500.f, "%.0f m");
-                ImGui::SliderFloat("Smooth", &aim.smooth, 1.f, 20.f, "%.1f");
-                const char* bones[] = {"Head", "Neck", "Body", "Pelvis"};
-                ImGui::Combo("Target Bone", &aim.target_bone, bones, 4);
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
-        }
-        ImGui::Separator();
-        if (ImGui::Button("Close", ImVec2(120.f, 30.f))) {
-            openFlag = false;
-        }
-    }
-    ImGui::End();
-    ImGui::PopStyleColor(3);
-    menu_open = openFlag;
-}
-
-static void EnsureDarkIOSKeyVerified(void) {
-    NSUserDefaults* defs = [NSUserDefaults standardUserDefaults];
-    NSString* savedKey = [defs stringForKey:@"DARKIOS_Saved_Key_v1"];
-    if (![savedKey isKindOfClass:[NSString class]] || savedKey.length < 10 || ![savedKey hasPrefix:@"DARKIOS-"]) {
-        [defs setObject:@"DARKIOS-1D-ADMIN01" forKey:@"DARKIOS_Saved_Key_v1"];
-    }
-    [defs setBool:YES forKey:@"ESP_Key_Verified_v1"];
-    [defs setBool:YES forKey:@"DARKIOS_Key_Verified_v1"];
-    [defs synchronize];
-}
-
-static void ToggleMenuViaImGuiLoad(BOOL forceOpen, BOOL toggle) {
-    EnsureDarkIOSKeyVerified();
-    IsLogin = true;
-    BOOL nextState = toggle ? !(BOOL)menu_open : forceOpen;
-    menu_open = (bool)nextState;
-    if (nextState) {
-        MenDeal = true;
-    }
-
-    dispatch_block_t applyBlock = ^{
-        [[ImGuiLoad share] initTapGes];
-        [[ImGuiLoad share] setMenuVisible:YES];
-        if (nextState) {
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"MeenuOpenRequested" object:nil];
-        }
+        int target_bone = 0;
+        int trigger_mode = 0;
+        int silent_bone = 0;
     };
 
-    if ([NSThread isMainThread]) {
-        applyBlock();
-    } else {
-        dispatch_async(dispatch_get_main_queue(), applyBlock);
+    struct VisualSettings {
+        bool boxes = false;
+        bool health = false;
+        bool skeleton = false;
+        bool names = false;
+        bool distance = false;
+        bool snapline = false;
+        bool indicators = false;
+        bool indicator_fill = false;
+        bool self_skeleton = false;
+        bool draw_bots = false;
+
+        float indicator_size = 20.0f;
+        float indicator_width = 50.0f;
+        float indicator_distance = 180.0f;
+        float line_width = 1.5f;
+
+        float box_color[4] = {1, 1, 1, 1};
+        float skeleton_color[4] = {1, 1, 1, 1};
+        float snapline_color[4] = {1, 1, 1, 1};
+        float indicator_color[4] = {1, 1, 1, 1};
+        float silent_color[4] = {1, 0, 0, 1};
+    };
+
+    struct ItemSettings {
+        bool vehicles = false;
+        bool metro_chests = false;
+        bool snow = false;
+        float max_distance = 200.0f;
+    };
+
+    struct LootSettings {
+        bool enabled = false;
+        bool weapons = false;
+        bool attachments = false;
+        bool scopes = false;
+        bool ammo = false;
+        bool health = false;
+        bool backpacks = false;
+        bool helmets = false;
+        bool vests = false;
+        bool metro_items = false;
+        bool rare_only = false;
+        float max_distance = 150.0f;
+    };
+
+    static AimSettings aim;
+    static VisualSettings vis;
+    static ItemSettings itemEsp;
+    static LootSettings lootEsp;
+
+    static int selectedTab = 0;
+    static bool showSearch = false;
+    static bool showSettings = false;
+    static bool showResetPopup = false;
+
+    static void SaveSettings() {
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+
+        [d setBool:aim.enabled forKey:@"ui_ae"];
+        [d setBool:aim.silent forKey:@"ui_as"];
+        [d setBool:aim.show_fov forKey:@"ui_af"];
+        [d setBool:aim.silent_show_fov forKey:@"ui_asf"];
+        [d setBool:aim.prediction forKey:@"ui_ap"];
+
+        [d setFloat:aim.fov_size forKey:@"ui_afs"];
+        [d setFloat:aim.max_distance forKey:@"ui_am"];
+        [d setFloat:aim.silent_distance forKey:@"ui_asd"];
+        [d setFloat:aim.smooth forKey:@"ui_asm"];
+        [d setFloat:aim.silent_fov forKey:@"ui_asfo"];
+
+        [d setBool:vis.boxes forKey:@"ui_vb"];
+        [d setBool:vis.health forKey:@"ui_vh"];
+        [d setBool:vis.skeleton forKey:@"ui_vs"];
+        [d setBool:vis.names forKey:@"ui_vn"];
+        [d setBool:vis.distance forKey:@"ui_vd"];
+        [d setBool:vis.snapline forKey:@"ui_vsp"];
+
+        [d setBool:lootEsp.enabled forKey:@"ui_le"];
+        [d setBool:lootEsp.weapons forKey:@"ui_lw"];
+        [d setBool:lootEsp.attachments forKey:@"ui_la"];
+
+        [d synchronize];
+    }
+
+    static void LoadSettings() {
+        NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+
+        aim.enabled = [d boolForKey:@"ui_ae"];
+        aim.silent = [d boolForKey:@"ui_as"];
+        aim.show_fov = [d boolForKey:@"ui_af"];
+        aim.silent_show_fov = [d boolForKey:@"ui_asf"];
+        aim.prediction = [d boolForKey:@"ui_ap"];
+
+        aim.fov_size = [d floatForKey:@"ui_afs"];
+        aim.max_distance = [d floatForKey:@"ui_am"];
+        aim.silent_distance = [d floatForKey:@"ui_asd"];
+        aim.smooth = [d floatForKey:@"ui_asm"];
+        aim.silent_fov = [d floatForKey:@"ui_asfo"];
+
+        vis.boxes = [d boolForKey:@"ui_vb"];
+        vis.health = [d boolForKey:@"ui_vh"];
+        vis.skeleton = [d boolForKey:@"ui_vs"];
+        vis.names = [d boolForKey:@"ui_vn"];
+        vis.distance = [d boolForKey:@"ui_vd"];
+        vis.snapline = [d boolForKey:@"ui_vsp"];
+
+        lootEsp.enabled = [d boolForKey:@"ui_le"];
+        lootEsp.weapons = [d boolForKey:@"ui_lw"];
+        lootEsp.attachments = [d boolForKey:@"ui_la"];
     }
 }
 
-extern "C" void OpenNewMenu(void) {
-    ToggleMenuViaImGuiLoad(YES, YES);
+@implementation ImGuiDrawView
+
++ (void)load {
+    SilenticumUI::LoadSettings();
 }
 
-@interface ThreeFingerTripleTapHandler : NSObject
-- (void)onThreeFingerTripleTap:(UITapGestureRecognizer *)gr;
-@end
-
-static ThreeFingerTripleTapHandler *g_TripleTapHandler = nil;
-
-@implementation ThreeFingerTripleTapHandler
-- (void)onThreeFingerTripleTap:(UITapGestureRecognizer *)gr {
-    if (gr.state == UIGestureRecognizerStateEnded) {
-        OpenNewMenu();
-    }
++ (void)showChange:(BOOL)open {
+    menu_open = open;
 }
-@end
 
-static void AttachThreeFingerTripleTap(UIWindow *win) {
-    if (!win) return;
-    if (!g_TripleTapHandler) {
-        g_TripleTapHandler = [[ThreeFingerTripleTapHandler alloc] init];
++ (BOOL)isMenuShowing {
+    return menu_open;
+}
+
+- (instancetype)init {
+    self = [super init];
+
+    if (self) {
+        _device = MTLCreateSystemDefaultDevice();
+        _commandQueue = [_device newCommandQueue];
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+
+        ImGuiIO &io = ImGui::GetIO();
+
+        io.Fonts->AddFontFromMemoryTTF(
+            museo500_binary,
+            sizeof(museo500_binary),
+            14
+        );
+
+        static const ImWchar icon_ranges[] = {
+            ICON_MIN_FA,
+            ICON_MAX_FA,
+            0
+        };
+
+        ImFontConfig icons_config;
+        icons_config.MergeMode = true;
+        icons_config.PixelSnapH = true;
+
+        io.Fonts->AddFontFromMemoryTTF(
+            &font_awesome_binary,
+            sizeof(font_awesome_binary),
+            13,
+            &icons_config,
+            icon_ranges
+        );
+
+        io.Fonts->AddFontFromMemoryTTF(
+            museo900_binary,
+            sizeof(museo900_binary),
+            28
+        );
+
+        ImGui::StyleColorsDark();
+        ImGui::GetStyle().ScaleAllSizes(0.85f);
+
+        ImGui_ImplMetal_Init(_device);
     }
-    for (UIGestureRecognizer *existing in win.gestureRecognizers) {
-        if ([existing isKindOfClass:[UITapGestureRecognizer class]]) {
-            UITapGestureRecognizer *tgr = (UITapGestureRecognizer *)existing;
-            if (tgr.numberOfTouchesRequired == 3 && tgr.numberOfTapsRequired == 3) {
-                return;
-            }
+
+    return self;
+}
+
+- (void)loadView {
+    self.view = [[MTKView alloc] initWithFrame:
+        CGRectMake(
+            0,
+            0,
+            [UIScreen mainScreen].bounds.size.width,
+            [UIScreen mainScreen].bounds.size.height
+        )
+    ];
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+
+    self.mtkView = (MTKView *)self.view;
+    self.mtkView.device = self.device;
+    self.mtkView.delegate = self;
+
+    self.mtkView.clearColor = MTLClearColorMake(0, 0, 0, 0);
+    self.mtkView.backgroundColor = [UIColor clearColor];
+}
+
+- (void)updateIOWithTouchEvent:(UIEvent *)event {
+    UITouch *touch = event.allTouches.anyObject;
+
+    if (!touch) return;
+
+    CGPoint point = [touch locationInView:self.view];
+
+    ImGuiIO &io = ImGui::GetIO();
+
+    io.MousePos = ImVec2(point.x, point.y);
+
+    BOOL active = NO;
+
+    for (UITouch *t in event.allTouches) {
+        if (t.phase != UITouchPhaseEnded &&
+            t.phase != UITouchPhaseCancelled) {
+            active = YES;
+            break;
         }
     }
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:g_TripleTapHandler action:@selector(onThreeFingerTripleTap:)];
-    tap.numberOfTouchesRequired = 3;
-    tap.numberOfTapsRequired = 3;
-    tap.cancelsTouchesInView = NO;
-    tap.delaysTouchesBegan = NO;
-    tap.delaysTouchesEnded = NO;
-    [win addGestureRecognizer:tap];
+
+    io.MouseDown[0] = active;
 }
 
-static void RegisterThreeFingerTripleTapLoop(void) {
-    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-        if ([scene isKindOfClass:[UIWindowScene class]]) {
-            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                AttachThreeFingerTripleTap(w);
+- (void)touchesBegan:(NSSet<UITouch *> *)touches
+           withEvent:(UIEvent *)event {
+    [self updateIOWithTouchEvent:event];
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches
+           withEvent:(UIEvent *)event {
+    [self updateIOWithTouchEvent:event];
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches
+              withEvent:(UIEvent *)event {
+    [self updateIOWithTouchEvent:event];
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches
+           withEvent:(UIEvent *)event {
+    [self updateIOWithTouchEvent:event];
+}
+
+// UI-only helper.
+static void DrawGroupTitle(const char *title) {
+    ImGui::PushStyleColor(
+        ImGuiCol_Text,
+        ImVec4(0.55f, 0.57f, 0.62f, 1.0f)
+    );
+
+    ImGui::TextUnformatted(title);
+
+    ImGui::PopStyleColor();
+}
+
+- (void)drawInMTKView:(MTKView *)view {
+    @try {
+        ImGuiIO &io = ImGui::GetIO();
+
+        io.DisplaySize = ImVec2(
+            view.bounds.size.width,
+            view.bounds.size.height
+        );
+
+        io.DisplayFramebufferScale = ImVec2(
+            view.window.screen.nativeScale,
+            view.window.screen.nativeScale
+        );
+
+        io.DeltaTime = 1.0f / 60.0f;
+
+        [self.view setUserInteractionEnabled:menu_open];
+
+        id<MTLCommandBuffer> commandBuffer =
+            [self.commandQueue commandBuffer];
+
+        MTLRenderPassDescriptor *renderPass =
+            view.currentRenderPassDescriptor;
+
+        if (renderPass) {
+            id<MTLRenderCommandEncoder> encoder =
+                [commandBuffer renderCommandEncoderWithDescriptor:renderPass];
+
+            [encoder pushDebugGroup:@"SILENTICUM"];
+
+            ImGui_ImplMetal_NewFrame(renderPass);
+            ImGui::NewFrame();
+
+            if (menu_open) {
+                using namespace SilenticumUI;
+
+                ImGui::PushStyleVar(
+                    ImGuiStyleVar_WindowPadding,
+                    ImVec2(0, 0)
+                );
+
+                ImGui::SetNextWindowSize(
+                    ImVec2(690, 500),
+                    ImGuiCond_Always
+                );
+
+                ImGui::Begin(
+                    "SILENTICUM",
+                    nullptr,
+                    ImGuiWindowFlags_NoDecoration |
+                    ImGuiWindowFlags_NoBackground
+                );
+
+                ImGuiWindow *window = ImGui::GetCurrentWindow();
+                ImDrawList *draw = window->DrawList;
+
+                ImVec2 pos = window->Pos;
+                ImVec2 size = ImVec2(690, 500);
+
+                gui.m_anim = ImLerp(
+                    gui.m_anim,
+                    1.0f,
+                    0.045f
+                );
+
+                // Double-drawn title.
+                const char *title = "SILENTICUM";
+
+                ImVec2 titleSize =
+                    ImGui::CalcTextSize(title);
+
+                draw->AddText(
+                    io.Fonts->Fonts[2],
+                    28,
+                    pos + ImVec2(
+                        85 - titleSize.x / 2 + 1,
+                        20
+                    ),
+                    IM_COL32(120, 120, 255, 255),
+                    title
+                );
+
+                draw->AddText(
+                    io.Fonts->Fonts[2],
+                    28,
+                    pos + ImVec2(
+                        85 - titleSize.x / 2,
+                        20
+                    ),
+                    IM_COL32(255, 255, 255, 255),
+                    title
+                );
+
+                // Footer.
+                draw->AddLine(
+                    pos + ImVec2(0, size.y - 50),
+                    pos + ImVec2(170, size.y - 50),
+                    IM_COL32(255, 255, 255, 80)
+                );
+
+                draw->AddText(
+                    pos + ImVec2(50, size.y - 40),
+                    IM_COL32(255, 255, 255, 255),
+                    "@shiedLess"
+                );
+
+                draw->AddText(
+                    pos + ImVec2(50, size.y - 25),
+                    IM_COL32(150, 150, 150, 255),
+                    "Till:"
+                );
+
+                draw->AddText(
+                    pos + ImVec2(
+                        50 + ImGui::CalcTextSize("Till: ").x,
+                        size.y - 25
+                    ),
+                    IM_COL32(120, 120, 255, 255),
+                    "mywings"
+                );
+
+                // Sidebar.
+                ImGui::SetCursorPos(ImVec2(10, 70));
+
+                ImGui::BeginChild(
+                    "##tabs",
+                    ImVec2(150, size.y - 120),
+                    false
+                );
+
+                DrawGroupTitle("Aimbot");
+
+                if (gui.tab(
+                    ICON_FA_CROSSHAIRS,
+                    "Aim Bot",
+                    selectedTab == 0
+                )) selectedTab = 0;
+
+                if (gui.tab(
+                    ICON_FA_GHOST,
+                    "Advanced",
+                    selectedTab == 1
+                )) selectedTab = 1;
+
+                if (gui.tab(
+                    ICON_FA_MOUSE,
+                    "Legit Bot",
+                    selectedTab == 2
+                )) selectedTab = 2;
+
+                ImGui::Spacing();
+                ImGui::Spacing();
+                ImGui::Spacing();
+
+                DrawGroupTitle("Visuals");
+
+                if (gui.tab(
+                    ICON_FA_USER,
+                    "Players",
+                    selectedTab == 3
+                )) selectedTab = 3;
+
+                if (gui.tab(
+                    ICON_FA_PALLET,
+                    "World",
+                    selectedTab == 4
+                )) selectedTab = 4;
+
+                ImGui::Spacing();
+                ImGui::Spacing();
+                ImGui::Spacing();
+
+                DrawGroupTitle("Miscellaneous");
+
+                if (gui.tab(
+                    ICON_FA_HAMMER,
+                    "Main",
+                    selectedTab == 5
+                )) selectedTab = 5;
+
+                if (gui.tab(
+                    ICON_FA_CODE,
+                    "Scripts",
+                    selectedTab == 6
+                )) selectedTab = 6;
+
+                ImGui::EndChild();
+
+                // Save button.
+                ImGui::SetCursorPos(ImVec2(190, 20));
+
+                if (ImGui::Button(
+                    ICON_FA_SAVE " Save",
+                    ImVec2(95, 25)
+                )) {
+                    SaveSettings();
+                }
+
+                // Search and settings.
+                ImGui::SetCursorPos(ImVec2(620, 20));
+
+                ImGui::PushStyleColor(
+                    ImGuiCol_Button,
+                    ImVec4(0, 0, 0, 0)
+                );
+
+                ImGui::PushStyleColor(
+                    ImGuiCol_ButtonHovered,
+                    ImVec4(0, 0, 0, 0)
+                );
+
+                ImGui::PushStyleColor(
+                    ImGuiCol_ButtonActive,
+                    ImVec4(0, 0, 0, 0)
+                );
+
+                if (ImGui::Button(
+                    ICON_FA_SEARCH,
+                    ImVec2(25, 25)
+                )) {
+                    showSearch = !showSearch;
+                }
+
+                ImGui::SameLine();
+
+                ImGui::SetCursorPos(ImVec2(650, 20));
+
+                if (ImGui::Button(
+                    ICON_FA_COG,
+                    ImVec2(25, 25)
+                )) {
+                    showSettings = !showSettings;
+                }
+
+                ImGui::PopStyleColor(3);
+
+                // Main content.
+                ImGui::PushStyleVar(
+                    ImGuiStyleVar_ItemSpacing,
+                    ImVec2(8, 8)
+                );
+
+                ImGui::SetCursorPos(
+                    ImVec2(185, 81 - (5 * gui.m_anim))
+                );
+
+                float childHeight = size.y - 110;
+
+                ImGui::BeginChild(
+                    "##childs",
+                    ImVec2(size.x - 200, childHeight),
+                    false,
+                    ImGuiWindowFlags_NoScrollbar
+                );
+
+                float groupWidth =
+                    ImGui::GetWindowWidth() / 2 -
+                    ImGui::GetStyle().ItemSpacing.x / 2;
+
+                float fullHeight = ImGui::GetWindowHeight();
+                float halfHeight = fullHeight / 2 - 10;
+                float smallHeight = fullHeight * 0.7f;
+
+                switch (selectedTab) {
+
+                    case 0:
+                        gui.group_box("Aim Bot", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("enable aimbot", &aim.enabled);
+                        ImGui::Checkbox("show fov", &aim.show_fov);
+                        ImGui::SliderFloat("fov size", &aim.fov_size, 0, 500, "%.0f");
+                        ImGui::SliderFloat("distance", &aim.max_distance, 0, 400, "%.0f");
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Smooth", ImVec2(groupWidth, halfHeight));
+                        ImGui::SliderFloat("smooth", &aim.smooth, 1, 10, "%.1f");
+                        ImGui::Checkbox("prediction", &aim.prediction);
+
+                        {
+                            const char *bones[] = {
+                                "head", "neck", "chest", "pelvis"
+                            };
+
+                            ImGui::Combo("bone", &aim.target_bone, bones, 4);
+                        }
+
+                        gui.end_group_box();
+
+                        gui.group_box("Trigger", ImVec2(groupWidth, halfHeight));
+
+                        {
+                            const char *modes[] = {
+                                "always", "on fire", "on ads", "both"
+                            };
+
+                            ImGui::Combo(
+                                "trigger",
+                                &aim.trigger_mode,
+                                modes,
+                                4
+                            );
+                        }
+
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Silent", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("enable silent", &aim.silent);
+                        ImGui::Checkbox("show silent fov", &aim.silent_show_fov);
+                        ImGui::SliderFloat("fov", &aim.silent_fov, 0, 500, "%.0f");
+                        ImGui::SliderFloat("distance", &aim.silent_distance, 0, 400, "%.0f");
+                        ImGui::Checkbox("visible check", &aim.silent_vis_check);
+                        gui.end_group_box();
+                        break;
+
+                    case 1:
+                        gui.group_box("Protection", ImVec2(groupWidth, smallHeight));
+                        ImGui::Checkbox("grenade warning", &aim.grenade_warning);
+                        ImGui::Checkbox("vehicle aim", &aim.vehicle_aim);
+                        ImGui::Checkbox("closest priority", &aim.closest_priority);
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Colors", ImVec2(groupWidth, smallHeight));
+                        ImGui::ColorEdit4("box", vis.box_color);
+                        ImGui::ColorEdit4("skel", vis.skeleton_color);
+                        ImGui::ColorEdit4("line", vis.snapline_color);
+                        ImGui::ColorEdit4("ind", vis.indicator_color);
+                        ImGui::ColorEdit4("silent", vis.silent_color);
+                        gui.end_group_box();
+                        break;
+
+                    case 2:
+                        gui.group_box("Legit Bot", ImVec2(groupWidth, halfHeight));
+                        ImGui::SliderFloat("aim smooth", &aim.smooth, 1, 10, "%.1f");
+                        ImGui::SliderFloat("aim fov", &aim.fov_size, 0, 500, "%.0f");
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Settings", ImVec2(groupWidth, halfHeight));
+
+                        {
+                            const char *bones[] = {
+                                "head", "neck", "chest", "pelvis"
+                            };
+
+                            ImGui::Combo("aim bone", &aim.target_bone, bones, 4);
+                        }
+
+                        gui.end_group_box();
+                        break;
+
+                    case 3:
+                        gui.group_box("Player ESP", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("box", &vis.boxes);
+                        ImGui::Checkbox("health", &vis.health);
+                        ImGui::Checkbox("skeleton", &vis.skeleton);
+                        ImGui::Checkbox("name", &vis.names);
+                        ImGui::Checkbox("distance", &vis.distance);
+                        ImGui::Checkbox("snapline", &vis.snapline);
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Indicators", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("indicators", &vis.indicators);
+
+                        if (vis.indicators) {
+                            ImGui::Checkbox("fill", &vis.indicator_fill);
+                            ImGui::SliderFloat("size", &vis.indicator_size, 5, 60, "%.0f");
+                            ImGui::SliderFloat("width", &vis.indicator_width, 10, 100, "%.0f");
+                            ImGui::SliderFloat("dist", &vis.indicator_distance, 50, 400, "%.0f");
+                        }
+
+                        gui.end_group_box();
+
+                        gui.group_box("Other ESP", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("self skeleton", &vis.self_skeleton);
+                        ImGui::Checkbox("draw bots", &vis.draw_bots);
+                        gui.end_group_box();
+                        break;
+
+                    case 4:
+                        gui.group_box("Vehicles", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("vehicles", &itemEsp.vehicles);
+                        ImGui::Checkbox("loot boxes", &itemEsp.metro_chests);
+                        ImGui::SliderFloat("max distance", &itemEsp.max_distance, 50, 300, "%.0f");
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Loot", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("enable loot", &lootEsp.enabled);
+                        ImGui::Checkbox("weapons", &lootEsp.weapons);
+                        ImGui::Checkbox("attachments", &lootEsp.attachments);
+                        ImGui::Checkbox("scopes", &lootEsp.scopes);
+                        gui.end_group_box();
+
+                        gui.group_box("Items", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("ammo", &lootEsp.ammo);
+                        ImGui::Checkbox("meds", &lootEsp.health);
+                        ImGui::Checkbox("backpacks", &lootEsp.backpacks);
+                        ImGui::Checkbox("helmets", &lootEsp.helmets);
+                        ImGui::Checkbox("vests", &lootEsp.vests);
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Metro", ImVec2(groupWidth, halfHeight));
+                        ImGui::Checkbox("metro items", &lootEsp.metro_items);
+                        ImGui::Checkbox("rare only", &lootEsp.rare_only);
+                        ImGui::SliderFloat("loot distance", &lootEsp.max_distance, 50, 200, "%.0f");
+                        gui.end_group_box();
+                        break;
+
+                    case 5:
+                        gui.group_box("Main", ImVec2(groupWidth, fullHeight));
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Info", ImVec2(groupWidth, fullHeight));
+                        gui.end_group_box();
+                        break;
+
+                    case 6:
+                        gui.group_box("Scripts", ImVec2(groupWidth, fullHeight));
+
+                        if (ImGui::Button(
+                            "reset guest",
+                            ImVec2(groupWidth - 30, 55)
+                        )) {
+                            showResetPopup = true;
+                        }
+
+                        if (showResetPopup) {
+                            ImGui::OpenPopup("Wait Message");
+                        }
+
+                        if (ImGui::BeginPopupModal(
+                            "Wait Message",
+                            nullptr,
+                            ImGuiWindowFlags_AlwaysAutoResize
+                        )) {
+                            ImGui::Text("Guest account 5 seconds");
+
+                            if (ImGui::Button("Close")) {
+                                showResetPopup = false;
+                                ImGui::CloseCurrentPopup();
+                            }
+
+                            ImGui::EndPopup();
+                        }
+
+                        gui.end_group_box();
+
+                        ImGui::SameLine();
+
+                        gui.group_box("Config", ImVec2(groupWidth, fullHeight));
+                        gui.end_group_box();
+                        break;
+                }
+
+                ImGui::EndChild();
+
+                ImGui::PopStyleVar();
+
+                ImGui::End();
+
+                ImGui::PopStyleVar();
+
+                SaveSettings();
             }
+
+            ImGui::Render();
+
+            ImGui_ImplMetal_RenderDrawData(
+                ImGui::GetDrawData(),
+                commandBuffer,
+                encoder
+            );
+
+            [encoder popDebugGroup];
+            [encoder endEncoding];
+
+            [commandBuffer presentDrawable:view.currentDrawable];
         }
+
+        [commandBuffer commit];
     }
-    for (UIWindow *w in [UIApplication sharedApplication].windows) {
-        AttachThreeFingerTripleTap(w);
+    @catch (...) {
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        RegisterThreeFingerTripleTapLoop();
-    });
 }
 
-__attribute__((constructor))
-static void InitNewMenuGestureAndHooks(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        EnsureDarkIOSKeyVerified();
-        IsLogin = true;
-        [[ImGuiLoad share] initTapGes];
-        RegisterThreeFingerTripleTapLoop();
-    });
+- (void)mtkView:(MTKView *)view
+drawableSizeWillChange:(CGSize)size {
 }
+
+@end
