@@ -71,13 +71,13 @@ if (!is_array($jsonBody)) {
 $input = array_merge($_GET, $_POST, $jsonBody);
 
 $inputKey = trim((string)($input['key'] ?? ''));
-$hwid = trim((string)($input['hwid'] ?? ''));
+$inputUdid = trim((string)($input['udid'] ?? ($input['hwid'] ?? '')));
 
-if ($inputKey === '') {
+if ($inputKey === '' || $inputUdid === '') {
     echo json_encode([
         'status' => 'error',
         'valid' => false,
-        'message' => 'Key boş ola bilməz.'
+        'message' => 'Key və UDID boş ola bilməz.'
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -169,6 +169,17 @@ if (($rec['status'] ?? '') === 'Paused') {
     }
 }
 
+$expectedUdid = trim((string)($rec['udid'] ?? ($rec['boundUdid'] ?? '')));
+if ($expectedUdid !== '' && strcasecmp($expectedUdid, $inputUdid) !== 0) {
+    if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+    echo json_encode([
+        'status' => 'error',
+        'valid' => false,
+        'message' => 'Bu key başqa UDID-yə bağlıdır.'
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $durationMs = isset($rec['durationMs']) && $rec['durationMs'] !== null ? (int)$rec['durationMs'] : 0;
 $startedAt = isset($rec['startedAt']) && $rec['startedAt'] !== null ? (int)$rec['startedAt'] : 0;
 $isLifetime = ($durationMs <= 0);
@@ -197,7 +208,7 @@ $existingDevIdx = -1;
 $activeCount = 0;
 foreach ($devices as $dIdx => $d) {
     if (($d['keyId'] ?? '') === $keyId && ($d['status'] ?? 'Active') === 'Active') {
-        if ($hwid !== '' && ($d['hwid'] ?? '') === $hwid) {
+        if (strcasecmp((string)($d['udid'] ?? ''), $inputUdid) === 0 || strcasecmp((string)($d['hwid'] ?? ''), $inputUdid) === 0) {
             $existingDevIdx = $dIdx;
         } else {
             $activeCount++;
@@ -229,7 +240,8 @@ $deviceEntry = [
     'isp' => $geo['isp'],
     'asn' => $geo['asn'],
     'vpnActive' => $geo['vpnActive'],
-    'hwid' => $hwid !== '' ? $hwid : 'Unknown',
+    'udid' => $inputUdid,
+    'hwid' => (string)($input['hwid'] ?? $inputUdid),
     'deviceModel' => (string)($input['deviceModel'] ?? 'Unknown iPhone'),
     'deviceName' => (string)($input['deviceName'] ?? 'iPhone'),
     'machineId' => (string)($input['machineId'] ?? 'Unknown'),
@@ -265,6 +277,10 @@ if ($existingDevIdx !== -1) {
 }
 $store['devices'] = $devices;
 
+if ($expectedUdid === '') {
+    $rec['udid'] = $inputUdid;
+    $rec['boundUdid'] = $inputUdid;
+}
 if (!$isLifetime && $startedAt <= 0) {
     $startedAt = $nowMs;
     $rec['startedAt'] = $startedAt;
@@ -294,7 +310,8 @@ $expireEpoch = $isLifetime ? 0 : (int)floor(($startedAt + $durationMs) / 1000);
 echo json_encode([
     'status' => 'success',
     'valid' => true,
+    'udid' => $rec['udid'],
     'lifetime' => $isLifetime,
     'expire_epoch' => $expireEpoch,
-    'message' => 'Key doğrulandı.'
+    'message' => 'Key və UDID doğrulandı.'
 ], JSON_UNESCAPED_UNICODE);
