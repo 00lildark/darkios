@@ -7,7 +7,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
-#include <dyld/dyld.h>
+#include <mach-o/dyld.h>
 #include <UIKit/UIKit.h>
 
 #ifndef HMOOD_METALBIEW_IMPLEMENTATION
