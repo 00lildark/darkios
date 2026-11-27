@@ -17,11 +17,13 @@ extern "C" void DarkiosOpenBothMenus(void);
 
 static NSString *const API_VERIFY_URL = @"https://darkios.onrender.com/api/verify";
 static NSString *const kDarkiosSavedKey = @"SavedDarkIOSKey";
+static NSString *const kDarkiosSavedUDID = @"SavedDarkIOSUDID";
 static NSString *const kDarkiosSavedExpire = @"SavedDarkIOSExpire";
 static NSString *const kDarkiosSavedLifetime = @"SavedDarkIOSLifetime";
 static NSString *const kESPKeyVerifiedDefaultsKey = @"ESP_Key_Verified_v1";
 
 NSString *globalActiveKey = nil;
+NSString *globalActiveUDID = nil;
 static int64_t g_ExpireEpoch = 0;
 static bool g_IsLifetime = false;
 static BOOL g_ShowingDurationAlert = NO;
@@ -35,16 +37,23 @@ static NSTimer *g_LiveStatusTimer = nil;
 
 static DarkiosMenuIconView *g_DarkiosMenuIcon = nil;
 
+static NSString *getDeviceUDID(void) {
+    NSString *uuid = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+    if (uuid.length > 0) {
+        return uuid;
+    }
+    return @"UNKNOWN_DEVICE_UDID";
+}
+
 static BOOL isKeyAuthorized(void) {
-    if (!IsLogin || !globalActiveKey.length) {
+    NSString *currentUDID = getDeviceUDID();
+    if (!IsLogin || !globalActiveKey.length || !globalActiveUDID.length) {
+        return NO;
+    }
+    if ([globalActiveUDID caseInsensitiveCompare:currentUDID] != NSOrderedSame) {
         return NO;
     }
     return [[NSUserDefaults standardUserDefaults] boolForKey:kESPKeyVerifiedDefaultsKey];
-}
-
-static NSString *getDeviceHWID(void) {
-    NSString *uuid = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
-    return uuid ?: @"UNKNOWN_DEVICE_HWID";
 }
 
 static UIWindow *getKeyWindow(void) {
@@ -110,11 +119,13 @@ static void hideMenuButton(void) {
 static void clearSavedKey(void) {
     NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
     [ud removeObjectForKey:kDarkiosSavedKey];
+    [ud removeObjectForKey:kDarkiosSavedUDID];
     [ud removeObjectForKey:kDarkiosSavedExpire];
     [ud removeObjectForKey:kDarkiosSavedLifetime];
     [ud setBool:NO forKey:kESPKeyVerifiedDefaultsKey];
     [ud synchronize];
     globalActiveKey = nil;
+    globalActiveUDID = nil;
     g_ExpireEpoch = 0;
     g_IsLifetime = false;
     IsLogin = false;
@@ -313,10 +324,11 @@ static void showVerifiedDuration5Sec(int64_t expireEpoch, bool isLifetime) {
 
         g_ShowingDurationAlert = YES;
 
-        NSString *msg = [NSString stringWithFormat:@"Remaining time: %@",
+        NSString *msg = [NSString stringWithFormat:@"UDID: %@\nRemaining time: %@",
+                         globalActiveUDID ?: getDeviceUDID(),
                          formatRemainingTime(expireEpoch, isLifetime)];
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Key Verified"
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Key & UDID Verified"
                                                                        message:msg
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -369,13 +381,22 @@ static NSDictionary *parseServerJSON(NSData *data) {
     return [parsed isKindOfClass:[NSDictionary class]] ? (NSDictionary *)parsed : nil;
 }
 
-static void startLiveStatusMonitor(NSString *activeKey) {
-    if (!activeKey.length) return;
+static NSString *buildVerifyBody(NSString *key, NSString *udid) {
+    NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
+    NSString *encKey = [key stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
+    NSString *encUdid = [udid stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
+    NSString *model = [[[UIDevice currentDevice] model] stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"iPhone";
+    NSString *iosVer = [[[UIDevice currentDevice] systemVersion] stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"";
+    return [NSString stringWithFormat:@"key=%@&udid=%@&hwid=%@&deviceModel=%@&iosVersion=%@",
+            encKey, encUdid, encUdid, model, iosVer];
+}
+
+static void startLiveStatusMonitor(NSString *activeKey, NSString *activeUDID) {
+    if (!activeKey.length || !activeUDID.length) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         if (g_LiveStatusTimer) return;
         g_LiveStatusTimer = [NSTimer scheduledTimerWithTimeInterval:5.0 repeats:YES block:^(__unused NSTimer *timer) {
-            if (!isKeyAuthorized() || !globalActiveKey.length || g_CrashScheduled) return;
-            NSString *hwid = getDeviceHWID();
+            if (!isKeyAuthorized() || !globalActiveKey.length || !globalActiveUDID.length || g_CrashScheduled) return;
             NSURL *url = [NSURL URLWithString:API_VERIFY_URL];
             if (!url) return;
 
@@ -383,12 +404,7 @@ static void startLiveStatusMonitor(NSString *activeKey) {
             req.HTTPMethod = @"POST";
             req.timeoutInterval = 8.0;
             [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
-
-            NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
-            NSString *body = [NSString stringWithFormat:@"key=%@&hwid=%@",
-                              [globalActiveKey stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"",
-                              [hwid stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @""];
-            req.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
+            req.HTTPBody = [buildVerifyBody(globalActiveKey, globalActiveUDID) dataUsingEncoding:NSUTF8StringEncoding];
 
             [[[NSURLSession sharedSession] dataTaskWithRequest:req
                                              completionHandler:^(NSData *data, __unused NSURLResponse *resp, NSError *err) {
@@ -397,6 +413,7 @@ static void startLiveStatusMonitor(NSString *activeKey) {
                 if (!json) return;
 
                 NSString *status = [[json[@"status"] description] lowercaseString];
+                NSString *msg = [json[@"message"] isKindOfClass:[NSString class]] ? json[@"message"] : @"Access revoked";
 
                 if ([json[@"banned"] boolValue] || [status isEqualToString:@"banned"] || [status isEqualToString:@"ban"]) {
                     triggerCrashAfter3Seconds(@"Banned", @"You have been banned by admin");
@@ -412,12 +429,17 @@ static void startLiveStatusMonitor(NSString *activeKey) {
                     triggerCrashAfter3Seconds(@"Updating", @"Cheat is currently updating");
                     return;
                 }
+
+                BOOL ok = [json[@"valid"] boolValue] || [status isEqualToString:@"success"] || [status isEqualToString:@"valid"] || [status isEqualToString:@"ok"];
+                if (!ok) {
+                    triggerCrashAfter3Seconds(@"Verification Failed", msg);
+                }
             }] resume];
         }];
     });
 }
 
-static void handleServerStatusResponse(NSString *inputKey, NSDictionary *json, BOOL wasAlreadyLoggedIn) {
+static void handleServerStatusResponse(NSString *inputKey, NSString *inputUDID, NSDictionary *json, BOOL wasAlreadyLoggedIn) {
     NSString *status = [[json[@"status"] description] lowercaseString];
     NSString *rawMessage = [json[@"message"] isKindOfClass:[NSString class]] ? json[@"message"] : nil;
 
@@ -468,7 +490,12 @@ static void handleServerStatusResponse(NSString *inputKey, NSDictionary *json, B
             return;
         }
 
+        NSString *boundUDID = ([json[@"udid"] isKindOfClass:[NSString class]] && [json[@"udid"] length] > 0)
+            ? json[@"udid"]
+            : inputUDID;
+
         globalActiveKey = inputKey;
+        globalActiveUDID = boundUDID;
         g_ExpireEpoch = expireEpoch;
         g_IsLifetime = lifetime;
         IsLogin = true;
@@ -476,13 +503,14 @@ static void handleServerStatusResponse(NSString *inputKey, NSDictionary *json, B
 
         NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
         [ud setObject:inputKey forKey:kDarkiosSavedKey];
+        [ud setObject:boundUDID forKey:kDarkiosSavedUDID];
         [ud setObject:@(expireEpoch) forKey:kDarkiosSavedExpire];
         [ud setBool:lifetime forKey:kDarkiosSavedLifetime];
         [ud setBool:YES forKey:kESPKeyVerifiedDefaultsKey];
         [ud synchronize];
 
         showMenuIcons();
-        startLiveStatusMonitor(inputKey);
+        startLiveStatusMonitor(inputKey, boundUDID);
 
         dispatch_async(dispatch_get_main_queue(), ^{
             [[NSNotificationCenter defaultCenter] postNotificationName:@"StartHack" object:nil];
@@ -493,15 +521,20 @@ static void handleServerStatusResponse(NSString *inputKey, NSDictionary *json, B
         return;
     }
 
+    if (wasAlreadyLoggedIn || isKeyAuthorized()) {
+        triggerCrashAfter3Seconds(@"Verification Failed", rawMessage.length > 0 ? rawMessage : @"UDID or key mismatch.");
+        return;
+    }
+
     clearSavedKey();
     showAlertMessage(@"Login Failed",
-                     rawMessage.length > 0 ? rawMessage : @"Invalid or inactive key.",
+                     rawMessage.length > 0 ? rawMessage : @"Invalid key or UDID.",
                      YES);
 }
 
 static void verifyKeyWithServer(NSString *inputKey) {
     BOOL wasAlreadyLoggedIn = isKeyAuthorized();
-    NSString *hwid = getDeviceHWID();
+    NSString *udid = getDeviceUDID();
     NSURL *url = [NSURL URLWithString:API_VERIFY_URL];
     if (!url) {
         showAlertMessage(@"Error", @"Invalid server URL.", YES);
@@ -513,12 +546,7 @@ static void verifyKeyWithServer(NSString *inputKey) {
     request.timeoutInterval = 20.0;
     [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-
-    NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
-    NSString *postString = [NSString stringWithFormat:@"key=%@&hwid=%@",
-                            [inputKey stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @"",
-                            [hwid stringByAddingPercentEncodingWithAllowedCharacters:allowed] ?: @""];
-    request.HTTPBody = [postString dataUsingEncoding:NSUTF8StringEncoding];
+    request.HTTPBody = [buildVerifyBody(inputKey, udid) dataUsingEncoding:NSUTF8StringEncoding];
 
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request
                                                                 completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
@@ -550,7 +578,7 @@ static void verifyKeyWithServer(NSString *inputKey) {
             return;
         }
 
-        handleServerStatusResponse(inputKey, parsed, wasAlreadyLoggedIn);
+        handleServerStatusResponse(inputKey, udid, parsed, wasAlreadyLoggedIn);
     }];
     [task resume];
 }
@@ -570,9 +598,13 @@ extern "C" void showKeyMenu(void) {
         }
 
         NSString *savedKey = [[NSUserDefaults standardUserDefaults] stringForKey:kDarkiosSavedKey];
-        if (savedKey.length > 0) {
+        NSString *savedUDID = [[NSUserDefaults standardUserDefaults] stringForKey:kDarkiosSavedUDID];
+        NSString *currentUDID = getDeviceUDID();
+        if (savedKey.length > 0 && savedUDID.length > 0 && [savedUDID caseInsensitiveCompare:currentUDID] == NSOrderedSame) {
             verifyKeyWithServer(savedKey);
             return;
+        } else if (savedKey.length > 0) {
+            clearSavedKey();
         }
 
         if (g_KeyMenuPresented && [topVC isKindOfClass:[UIAlertController class]]) {
@@ -580,8 +612,9 @@ extern "C" void showKeyMenu(void) {
         }
         g_KeyMenuPresented = YES;
 
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"DARKIOS - Key Login"
-                                                                       message:@"Please enter the key from admin panel:"
+        NSString *msg = [NSString stringWithFormat:@"UDID: %@\nPlease enter the key from admin panel:", currentUDID];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"DARKIOS - UDID & Key Login"
+                                                                       message:msg
                                                                 preferredStyle:UIAlertControllerStyleAlert];
 
         alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -589,7 +622,7 @@ extern "C" void showKeyMenu(void) {
         [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
             textField.placeholder = @"DARKIOS-1D-XXXXX";
             textField.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
-            textField.autocorrectionType = UITextAutocorrectionTypeNo;
+            textField.autocorrectionType = UITextAutorerectionTypeNo;
             textField.clearButtonMode = UITextFieldViewModeWhileEditing;
         }];
 
