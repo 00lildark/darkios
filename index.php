@@ -149,6 +149,11 @@ function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedId
                 if (empty($item['startedAt']) && !empty($existing['startedAt'])) {
                     $item['startedAt'] = $existing['startedAt'];
                 }
+                foreach (['udid', 'boundUdid'] as $uField) {
+                    if (empty($item[$uField]) && !empty($existing[$uField])) {
+                        $item[$uField] = $existing[$uField];
+                    }
+                }
                 $map[$uk] = array_merge($existing, $item);
             }
         } else {
@@ -169,12 +174,13 @@ if (isset($_GET['verify'])) {
         $input = is_array($parsedForm) && !empty($parsedForm) ? $parsedForm : $_POST;
     }
     if (!is_array($input)) $input = [];
+    $input = array_merge($_GET, $_POST, $input);
 
-    $keyInput = trim((string)($input['key'] ?? ($_GET['key'] ?? '')));
-    $hwid = trim((string)($input['hwid'] ?? ($_GET['hwid'] ?? '')));
+    $keyInput = trim((string)($input['key'] ?? ''));
+    $udidInput = trim((string)($input['udid'] ?? ($input['hwid'] ?? '')));
 
-    if ($keyInput === '') {
-        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key boşdur']);
+    if ($keyInput === '' || $udidInput === '') {
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key və UDID boş ola bilməz']);
     }
 
     $lockFp = @fopen($lockFile, 'c+');
@@ -222,6 +228,12 @@ if (isset($_GET['verify'])) {
         }
     }
 
+    $expectedUdid = trim((string)($rec['udid'] ?? ($rec['boundUdid'] ?? '')));
+    if ($expectedUdid !== '' && strcasecmp($expectedUdid, $udidInput) !== 0) {
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Bu key başqa UDID-yə bağlıdır']);
+    }
+
     if (empty($rec['startedAt'])) {
         $rec['startedAt'] = $nowMs;
     }
@@ -241,7 +253,7 @@ if (isset($_GET['verify'])) {
     $keyDevices = array_values(array_filter($store['devices'], fn($d) => ($d['keyId'] ?? '') === $keyId));
     $existingDevIdx = -1;
     foreach ($store['devices'] as $dIdx => $dev) {
-        if (($dev['keyId'] ?? '') === $keyId && $hwid !== '' && ($dev['hwid'] ?? '') === $hwid) {
+        if (($dev['keyId'] ?? '') === $keyId && (strcasecmp((string)($dev['udid'] ?? ''), $udidInput) === 0 || strcasecmp((string)($dev['hwid'] ?? ''), $udidInput) === 0)) {
             $existingDevIdx = $dIdx;
             break;
         }
@@ -266,7 +278,8 @@ if (isset($_GET['verify'])) {
         'isp' => $geo['isp'],
         'asn' => $geo['asn'],
         'vpnActive' => $geo['vpnActive'],
-        'hwid' => $hwid ?: 'Unknown',
+        'udid' => $udidInput,
+        'hwid' => (string)($input['hwid'] ?? $udidInput),
         'deviceModel' => (string)($input['deviceModel'] ?? 'Unknown iPhone'),
         'deviceName' => (string)($input['deviceName'] ?? 'iPhone'),
         'machineId' => (string)($input['machineId'] ?? 'Unknown'),
@@ -301,6 +314,10 @@ if (isset($_GET['verify'])) {
         array_unshift($store['devices'], $devicePayload);
     }
 
+    if ($expectedUdid === '') {
+        $rec['udid'] = $udidInput;
+        $rec['boundUdid'] = $udidInput;
+    }
     $rec['modifiedAt'] = $nowMs;
     $store['records'][$foundIdx] = $rec;
     $store['updatedAt'] = $nowMs;
@@ -316,6 +333,7 @@ if (isset($_GET['verify'])) {
         'valid' => true,
         'message' => 'Verified',
         'key' => $rec['key'],
+        'udid' => $rec['udid'],
         'type' => $rec['type'] ?? 'NORMAL',
         'lifetime' => $isLifetime,
         'expire_epoch' => $expireEpoch,
@@ -422,7 +440,6 @@ $initialStore = darkiosReadStore($dataFile, $backupDir, $defaultStore);
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&family=Sora:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
-/* DARKIOS Admin Console theme */
 :root{
   --bg:#06060a;
   --rail:rgba(12,12,18,.78);
@@ -582,7 +599,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .reset{height:36px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-size:11.5px;font-weight:600;padding:0 14px;cursor:pointer;transition:all .2s}
 .reset:hover{border-color:var(--line-strong);background:var(--panel3)}
 .table-wrap{overflow-x:auto}
-.table{width:100%;border-collapse:separate;border-spacing:0;min-width:940px}
+.table{width:100%;border-collapse:separate;border-spacing:0;min-width:980px}
 .table th{
   height:40px;padding:0 16px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.8px;color:var(--muted);
   background:rgba(255,255,255,.025);border-bottom:1px solid var(--line);position:sticky;top:0;
@@ -790,7 +807,7 @@ input:checked + .slider:before{transform:translateX(24px)}
         <div class="heading">
           <div>
             <h1 id="h1Api">API Keys</h1>
-            <p id="subApi">Manage and monitor generated keys</p>
+            <p id="subApi">UDID + Key binding management and monitoring</p>
           </div>
           <button class="create" onclick="openCreate()" id="btnCreateTop">＋ Create API Key</button>
         </div>
@@ -806,7 +823,7 @@ input:checked + .slider:before{transform:translateX(24px)}
           <div class="table-head">
             <div class="table-title"><span id="tblTitle">API Key List</span> <span class="count" id="rowCount">0 keys</span></div>
             <div class="filters">
-              <input id="search" placeholder="Search name or key..." oninput="renderRows()">
+              <input id="search" placeholder="Search name, key or UDID..." oninput="renderRows()">
               <select id="statusFilter" onchange="renderRows()">
                 <option value="">Status</option>
                 <option value="Active">Active</option>
@@ -827,6 +844,7 @@ input:checked + .slider:before{transform:translateX(24px)}
                 <tr>
                   <th>NAME</th>
                   <th>KEY</th>
+                  <th>UDID</th>
                   <th>TYPE</th>
                   <th>STATUS</th>
                   <th>DEVICES</th>
@@ -852,6 +870,7 @@ input:checked + .slider:before{transform:translateX(24px)}
           <div class="formgrid">
             <div class="field"><label>Name (optional)</label><input id="genName" placeholder="Optional"></div>
             <div class="field"><label>Key type</label><select id="genType"><option value="NORMAL">NORMAL</option><option value="TESTER">TESTER</option></select></div>
+            <div class="field"><label>UDID (optional — auto-binds on first login if empty)</label><input id="genUdid" placeholder="Optional UDID"></div>
             <div class="field"><label>Max IP / Devices</label><select id="genDevices"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="0">Unlimited</option></select></div>
             <div class="field"><label>Validity unit</label><select id="genDurationUnit" onchange="toggleGenDuration()"><option value="HOUR">Hours (1HOUR)</option><option value="DAY" selected>Days (1DAY)</option><option value="WEEK">Weeks (1WEEK)</option><option value="MONTH">Months (1MONTH)</option><option value="YEAR">Years (1YEAR)</option><option value="LIFETIME">Lifetime</option></select></div>
             <div class="field"><label>Duration amount</label><input id="genDurationValue" type="number" min="1" value="1"></div>
@@ -973,7 +992,7 @@ let isSyncingFromServer=false;
 const i18n={
   en:{
     api:'API Keys',generator:'Key Generator',banned:'Banned Keys',settings:'Settings',
-    subApi:'Manage and monitor generated keys',
+    subApi:'UDID + Key binding management and monitoring',
     subGen:'Format: DARKIOS-1MONTH-XXXXXXXXXXXXXXXX / DARKIOS-TESTER-1MONTH-XXXXXXXXXXXXXXXX',
     subBan:'Blocked keys list',subSet:'System controls, UPDATE switch and backup',
     create:'＋ Create API Key',refresh:'Refresh',logout:'Sign out',reset:'Reset',
@@ -987,7 +1006,7 @@ const i18n={
   },
   tr:{
     api:'API Anahtarları',generator:'Anahtar Oluşturucu',banned:'Yasaklı Anahtarlar',settings:'Ayarlar',
-    subApi:'Oluşturulan anahtarları yönetin ve izleyin',
+    subApi:'UDID + Key bağlama yönetimi ve izleme',
     subGen:'Format: DARKIOS-1MONTH-XXXXXXXXXXXXXXXX / DARKIOS-TESTER-1MONTH-XXXXXXXXXXXXXXXX',
     subBan:'Engellenen anahtarlar listesi',subSet:'Sistem kontrolleri, UPDATE anahtarı ve yedekleme',
     create:'＋ API Anahtarı Oluştur',refresh:'Yenile',logout:'Çıkış yap',reset:'Sıfırla',
@@ -1237,18 +1256,24 @@ function statusBadgeText(r){
   return 'Active';
 }
 
+function getRecordUdid(r){
+  return String(r.udid||r.boundUdid||'').trim();
+}
+
 function renderRows(){
   checkStates();
   let q=$('#search').value.toLowerCase(),st=$('#statusFilter').value,ty=$('#typeFilter').value;
-  let arr=records.filter(r=>(!q||(r.name||'').toLowerCase().includes(q)||r.key.toLowerCase().includes(q))&&(!st||r.status===st)&&(!ty||r.type===ty));
+  let arr=records.filter(r=>(!q||(r.name||'').toLowerCase().includes(q)||r.key.toLowerCase().includes(q)||getRecordUdid(r).toLowerCase().includes(q))&&(!st||r.status===st)&&(!ty||r.type===ty));
   $('#rowCount').textContent=arr.length+' keys';
   $('#rows').innerHTML=arr.map(r=>{
     let active=deviceSessions.filter(d=>d.keyId===r.id&&d.status==='Active').length;
     let limit=r.deviceLimit===0?'∞':(r.deviceLimit||1);
     let cls=r.status==='Active'?'active':(r.status==='Paused'||r.status==='Expired'?'paused':'');
+    let uVal=getRecordUdid(r);
     return `<tr>
       <td><div class="name">${esc(r.name||'Key')}</div><div class="desc">${esc(r.description||'—')}</div></td>
       <td><div class="key-cell"><button type="button" class="copy-icon-btn" title="Copy" onclick="copyKey('${r.id}')">${COPY_ICON_SVG}</button><span class="keycode">${esc(r.key)}</span></div></td>
+      <td><span class="keycode">${esc(uVal||'UNBOUND')}</span></td>
       <td><span class="type">${esc(r.type||'NORMAL')}</span></td>
       <td><span class="status ${cls}">${esc(statusBadgeText(r))}</span></td>
       <td>${active} / ${limit}</td>
@@ -1256,7 +1281,7 @@ function renderRows(){
       <td>${esc(r.created||'')}</td>
       <td><button class="dots" onclick="rowMenu('${r.id}')">⋮</button></td>
     </tr>`;
-  }).join('')||`<tr><td colspan="8" class="blank">${esc(t('noKeys'))}</td></tr>`;
+  }).join('')||`<tr><td colspan="9" class="blank">${esc(t('noKeys'))}</td></tr>`;
 
   $('#mTotal').textContent=records.length;
   $('#mActive').textContent=records.filter(r=>r.status==='Active').length;
@@ -1321,6 +1346,7 @@ function openCreate(){
     <div class="formgrid">
       <div class="field"><label>Name (optional)</label><input id="newName" placeholder="Optional"></div>
       <div class="field"><label>Key type</label><select id="newType"><option value="NORMAL">NORMAL</option><option value="TESTER">TESTER</option></select></div>
+      <div class="field full"><label>UDID (optional — auto-binds on first login if empty)</label><input id="newUdid" placeholder="Optional UDID"></div>
       <div class="field"><label>Max IP / Devices</label><select id="newDeviceLimit"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="5">5</option><option value="0">Unlimited</option></select></div>
       <div class="field"><label>Validity unit</label><select id="newDurationUnit" onchange="toggleModalDuration()"><option value="HOUR">Hours (1HOUR)</option><option value="DAY" selected>Days (1DAY)</option><option value="WEEK">Weeks (1WEEK)</option><option value="MONTH">Months (1MONTH)</option><option value="YEAR">Years (1YEAR)</option><option value="LIFETIME">Lifetime</option></select></div>
       <div class="field"><label>Duration amount</label><input id="newDurationValue" type="number" min="1" value="1"></div>
@@ -1328,7 +1354,7 @@ function openCreate(){
       <div class="field full"><label>Custom key (exact value)</label><input id="newCustomKey" placeholder="Optional exact key"></div>
       <div class="field full"><label>Description (optional)</label><input id="newDesc" placeholder="Optional"></div>
     </div>
-    <p class="footnote">Countdown starts only when the first device connects.</p>
+    <p class="footnote">Countdown starts only when the first device connects. Key binds to UDID on verification.</p>
     <div class="modal-actions">
       <button type="button" class="secondary" onclick="closeModal()">Cancel</button>
       <button class="create">Create API Key</button>
@@ -1348,11 +1374,13 @@ function createRecord(e){
   e.preventDefault();
   const type=$('#newType').value,unit=$('#newDurationUnit').value,val=$('#newDurationValue').value;
   const prefix=$('#newPrefix').value,customKey=$('#newCustomKey').value;
+  const udidVal=($('#newUdid')?.value||'').trim();
   const name=($('#newName').value||'').trim()||'Key',desc=($('#newDesc').value||'').trim()||'—';
   const durationMs=durationToMs(unit,val),now=Date.now();
 
   const r={
     id:uid(),name,description:desc,type,
+    udid:udidVal,boundUdid:udidVal,
     status:updateModeOn?'Paused':'Active',
     pauseType:updateModeOn?'update':null,pauseUntil:null,
     deviceLimit:+($('#newDeviceLimit').value||1),
@@ -1368,6 +1396,33 @@ function createRecord(e){
     </div>`);
 }
 
+function openSetUdidModal(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  modal('Set / Reset UDID Binding',`
+    <div class="clean-meta">
+      <div><strong>${esc(r.key)}</strong></div>
+      <div>Current UDID: <strong>${esc(getRecordUdid(r)||'UNBOUND')}</strong></div>
+    </div>
+    <div class="field">
+      <label>UDID (leave empty to unbind and allow next device to bind)</label>
+      <input id="editUdidInput" value="${esc(getRecordUdid(r))}" placeholder="Enter UDID or leave empty">
+    </div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="rowMenu('${id}')">Back</button>
+      <button class="create" onclick="saveUdidBinding('${id}')">Save UDID</button>
+    </div>
+  `);
+}
+
+function saveUdidBinding(id){
+  const r=records.find(x=>x.id===id);if(!r)return;
+  const val=($('#editUdidInput')?.value||'').trim();
+  r.udid=val;
+  r.boundUdid=val;
+  r.modifiedAt=Date.now();
+  persist('merge');renderAll();rowMenu(id);notify(val?'UDID updated':'UDID unbound');
+}
+
 function openDeviceInfoModal(keyId){
   const r=records.find(x=>x.id===keyId);
   if(!r)return;
@@ -1375,10 +1430,11 @@ function openDeviceInfoModal(keyId){
   modal(`Real Devices (${list.length})`,`
     <div class="clean-meta">
       <div><strong>${esc(r.key)}</strong></div>
+      <div>Bound UDID: <strong>${esc(getRecordUdid(r)||'UNBOUND')}</strong></div>
       <div>Connected real devices: <span>${list.length}</span></div>
     </div>
     <div class="field" style="margin-bottom:10px">
-      <label>Cihaz axtarışı (model, IP, iOS, şəhər, HWID, batareya)</label>
+      <label>Cihaz axtarışı (model, IP, iOS, şəhər, UDID, HWID, batareya)</label>
       <input id="devSearchInput" placeholder="Məs: iPhone 16 Pro, 185., iOS 26..." oninput="filterDeviceList()">
     </div>
     <div id="devInfoList" class="clean-list"></div>
@@ -1406,7 +1462,7 @@ function renderFilteredDevices(list){
   }
   wrap.innerHTML=list.map((d,i)=>`
     <button type="button" class="clean-btn" onclick="showSingleDeviceDetails(${i})">
-      <span><strong>${esc(d.deviceModel||'Device')}</strong> · ${esc(d.battery||'—')} · ${esc(d.iosVersion||'—')}</span>
+      <span><strong>${esc(d.deviceModel||'Device')}</strong> · ${esc(d.udid||d.hwid||'—')} · ${esc(d.iosVersion||'—')}</span>
       <span>${esc(d.ip||'—')}</span>
     </button>
   `).join('');
@@ -1417,6 +1473,8 @@ function showSingleDeviceDetails(index){
   const d=(window.__filteredDevices||[])[index];
   if(!d)return;
   const rows=[
+    ['UDID',d.udid],
+    ['HWID',d.hwid],
     ['Public IP Address',d.ip],
     ['Location',d.location],
     ['ISP / Provider',d.isp],
@@ -1433,7 +1491,6 @@ function showSingleDeviceDetails(index){
     ['Battery Level',d.battery],
     ['Battery State',d.batteryState],
     ['Low Power Mode',d.lowPowerMode],
-    ['HWID',d.hwid],
     ['Architecture',d.architecture],
     ['CPU Cores',d.cpuCores],
     ['Total RAM',d.ramTotal],
@@ -1464,14 +1521,17 @@ function showSingleDeviceDetails(index){
 function rowMenu(id){
   const r=records.find(x=>x.id===id);if(!r)return;
   const limitText=r.deviceLimit===0?'Unlimited':(r.deviceLimit||1);
+  const uVal=getRecordUdid(r);
   modal('Key Actions',`
     <div class="clean-meta">
       <div><strong>${esc(r.key)}</strong></div>
+      <div>UDID: <strong>${esc(uVal||'UNBOUND')}</strong></div>
       <div>Status: <span>${esc(statusBadgeText(r))}</span> · Limit: <span>${esc(limitText)}</span> · Time: <span>${esc(timeLeftText(r))}</span></div>
     </div>
 
     <div class="clean-list">
       <button class="clean-btn" onclick="copyKey('${id}')"><span>Copy Key</span><span>Copy</span></button>
+      <button class="clean-btn" onclick="openSetUdidModal('${id}')"><span>Set / Reset UDID</span><span>UDID</span></button>
       <button class="clean-btn" onclick="openDeviceInfoModal('${id}')"><span>Device Info & Search</span><span>Info</span></button>
 
       <div class="clean-row">
@@ -1604,7 +1664,7 @@ function resumeKey(id){
 
 function banRecord(id){
   const r=records.find(x=>x.id===id);if(!r)return;
-  const banEntry={id:uid(),key:r.key,reason:'Banned by admin',date:new Date().toLocaleString(),modifiedAt:Date.now()};
+  const banEntry={id:uid(),key:r.key,udid:getRecordUdid(r),reason:'Banned by admin',date:new Date().toLocaleString(),modifiedAt:Date.now()};
   banned.unshift(banEntry);
   records=records.filter(x=>x.id!==id);
   persist('ban_key',{id,key:r.key,banEntry});renderAll();closeModal();notify('Banned');
@@ -1620,12 +1680,14 @@ function generateKeys(){
   const name=($('#genName').value||'').trim()||'Key',desc=($('#genDesc').value||'').trim()||'—';
   const type=$('#genType').value,unit=$('#genDurationUnit').value,val=$('#genDurationValue').value;
   const prefix=$('#genPrefix').value,customKey=$('#genCustomKey').value;
+  const udidVal=($('#genUdid')?.value||'').trim();
   const durationMs=durationToMs(unit,val),now=Date.now(),out=[];
 
   for(let i=0;i<n;i++){
     const keyVal=buildKeyValue({type,prefix,unit,val,customKey:(n===1&&customKey.trim())?customKey:''});
     const r={
       id:uid(),name,description:desc,type,
+      udid:udidVal,boundUdid:udidVal,
       status:updateModeOn?'Paused':'Active',
       pauseType:updateModeOn?'update':null,pauseUntil:null,
       deviceLimit:+$('#genDevices').value,
@@ -1653,7 +1715,7 @@ function openBan(){
 function banManual(e){
   e.preventDefault();
   const keyVal=$('#banValue').value.trim(),existing=records.find(r=>r.key===keyVal);
-  const banEntry={id:uid(),key:keyVal,reason:($('#banReason').value||'').trim()||'Banned',date:new Date().toLocaleString(),modifiedAt:Date.now()};
+  const banEntry={id:uid(),key:keyVal,udid:existing?getRecordUdid(existing):'',reason:($('#banReason').value||'').trim()||'Banned',date:new Date().toLocaleString(),modifiedAt:Date.now()};
   banned.unshift(banEntry);
   records=records.filter(r=>r.key!==keyVal);
   persist('ban_key',{id:existing?existing.id:'',key:keyVal,banEntry});renderAll();closeModal();notify('Banned');
@@ -1681,7 +1743,7 @@ function importTxt(file){
     let added=0;const now=Date.now();
     for(const key of lines){
       if(records.some(r=>r.key===key))continue;
-      records.unshift({id:uid(),name:'Key',description:'—',type:'NORMAL',status:updateModeOn?'Paused':'Active',pauseType:updateModeOn?'update':null,pauseUntil:null,deviceLimit:1,created:new Date().toISOString().slice(0,16).replace('T',' '),modifiedAt:now,key,durationMs:null,startedAt:null});
+      records.unshift({id:uid(),name:'Key',description:'—',type:'NORMAL',udid:'',boundUdid:'',status:updateModeOn?'Paused':'Active',pauseType:updateModeOn?'update':null,pauseUntil:null,deviceLimit:1,created:new Date().toISOString().slice(0,16).replace('T',' '),modifiedAt:now,key,durationMs:null,startedAt:null});
       added++;
     }
     persist('merge');renderAll();notify(`+${added}`);
