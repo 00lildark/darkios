@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_metal.h"
 #include "font_awesome_5.h"
 #include "fa_solid_900.h"
@@ -436,51 +437,46 @@ static void DrawGroupTitle(const char *title) {
                 ImVec2 titleSize =
                     ImGui::CalcTextSize(title);
 
+                ImFont *titleFont = (io.Fonts->Fonts.Size > 2 && io.Fonts->Fonts[2])
+                    ? io.Fonts->Fonts[2]
+                    : ImGui::GetFont();
+
                 draw->AddText(
-                    io.Fonts->Fonts[2],
+                    titleFont,
                     28,
-                    pos + ImVec2(
-                        85 - titleSize.x / 2 + 1,
-                        20
-                    ),
+                    ImVec2(pos.x + 85 - titleSize.x / 2 + 1, pos.y + 20),
                     IM_COL32(120, 120, 255, 255),
                     title
                 );
 
                 draw->AddText(
-                    io.Fonts->Fonts[2],
+                    titleFont,
                     28,
-                    pos + ImVec2(
-                        85 - titleSize.x / 2,
-                        20
-                    ),
+                    ImVec2(pos.x + 85 - titleSize.x / 2, pos.y + 20),
                     IM_COL32(255, 255, 255, 255),
                     title
                 );
 
                 draw->AddLine(
-                    pos + ImVec2(0, size.y - 50),
-                    pos + ImVec2(170, size.y - 50),
+                    ImVec2(pos.x, pos.y + size.y - 50),
+                    ImVec2(pos.x + 170, pos.y + size.y - 50),
                     IM_COL32(255, 255, 255, 80)
                 );
 
                 draw->AddText(
-                    pos + ImVec2(50, size.y - 40),
+                    ImVec2(pos.x + 50, pos.y + size.y - 40),
                     IM_COL32(255, 255, 255, 255),
                     "@shiedLess"
                 );
 
                 draw->AddText(
-                    pos + ImVec2(50, size.y - 25),
+                    ImVec2(pos.x + 50, pos.y + size.y - 25),
                     IM_COL32(150, 150, 150, 255),
                     "Till:"
                 );
 
                 draw->AddText(
-                    pos + ImVec2(
-                        50 + ImGui::CalcTextSize("Till: ").x,
-                        size.y - 25
-                    ),
+                    ImVec2(pos.x + 50 + ImGui::CalcTextSize("Till: ").x, pos.y + size.y - 25),
                     IM_COL32(120, 120, 255, 255),
                     "mywings"
                 );
