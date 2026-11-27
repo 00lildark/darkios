@@ -3,7 +3,7 @@
 #import "engine.h"
 #include "menu.h"
 #include "esp.h"
-#import "mahoa.h"
+#import "Mahoa.h"
 #include "sys/mman.h"
 #include "Tools.h"
 #include <stdio.h>
@@ -35,7 +35,7 @@
 #import "PubgLoad.h"
 #include "imgui.h"
 #import "HeeeNoScreenShotView.h"
-#import "ini_rw.h"
+#include "ini_rw.h"
 
 #define ImClamp(X, MIN, MAX) ((X) < (MIN) ? (MIN) : ((X) > (MAX) ? (MAX) : (X)))
 #define kWidth  [UIScreen mainScreen].bounds.size.width
@@ -52,232 +52,6 @@
 #include "ESP/Engine_2.h"
 #undef HMOOD_METALBIEW_IMPLEMENTATION
 
-bool hideNameKillMsg = false;
-float strokeIntensity = 1.0f;
-
-SDK::ASTExtraPlayerController* g_LocalController = nullptr;
-SDK::ASTExtraPlayerController* localPlayerController = nullptr;
-SDK::ASTExtraPlayerCharacter* localPlayer = nullptr;
-
-ImFont* mainFont = nullptr;
-float globalHpAlphaF = 1.00f;
-
-ImU32 COLOR_Distance = IM_COL32(255, 255, 255, 255);
-ImColor borderColor = ImColor(0, 255, 0, 255);
-ImColor bgColor = ImColor(0, 0, 0, 80);
-
-bool ifismembotenable = false;
-
-namespace Settings {
-    bool isVisibilityCheck = true;
-    bool ifismembotenable = false;
-    bool BypassMode = false;
-
-    namespace SettingsTab {
-        bool BypassMode = false;
-    }
-
-    namespace Aimbot {
-        bool Enable = false;
-        bool Tick = false;
-        int AimMethod = 0;
-        std::atomic<int> TriggerMode{3};
-        float FOV = 200.f;
-
-        bool MemoryAimbot = false;
-        bool SilentAim = false;
-
-        namespace SilentAimSettings {
-            bool Enable = true;
-            bool AimKnocked = false;
-            bool Highprecisiontracking = false;
-
-            int Aimpositon = 0;
-            bool Prediction = true;
-            bool EnableFov = true;
-            bool BypassFOVLimit = false;
-            bool AimingLine = false;
-            float MaxStepDeg = 2.0f;
-            inline int LegitTrackSwitchrate = 6;
-        }
-    }
-}
-
-float ESPMaxDistance = 300.f;
-float AlertRadius = 50.0f;
-float SilentAimMaxDistance = 355.f;
-int IsStyle = 1;
-
-namespace imgui {
-    bool ESP = false;
-    bool Boxes = false;
-    bool HideBot = false;
-    bool Health = false;
-    bool Line = false;
-    bool Name = false;
-    bool TeamID = false;
-    bool Distance = false;
-    bool EnemyCount = false;
-    bool Weapon = false;
-    bool Bone = false;
-    bool GameInfo = false;
-    bool Alert360 = false;
-    bool EnemyAiming = false;
-    bool Items = false;
-    bool Lootbox = false;
-    bool Vehicle = false;
-    bool Grenade = false;
-}
-
-namespace itemesp {
-    bool Enable = false;
-    bool Vehicles = true;
-    float MaxDistance = 200.0f;
-}
-
-bool IsEnglish = false;
-bool ShowFov = false;
-
-int 玩家 = 0, 人机 = 0;
-
-bool 坐标追 = false;
-bool 自动开火 = false;
-
-bool 下雨 = false;
-float 巨人 = 1.0f;
-bool 人物变大 = false;
-bool 重置游客 = false;
-
-int 打击圈 = 0;
-int CL = 1;
-
-bool 瞄准线 = false;
-bool AimBot = false;
-int AimF = 3;
-int value = 120;
-int Aim = 0;
-
-float 追踪概率 = 100.f;
-
-bool FixShoot = false;
-float Cross = 150.f;
-float g_disstance = 150.0f;
-
-bool IgnoreKnocked = false;
-bool VisCheck = false;
-bool IgnoreBot = false;
-
-float RadarX = 30.f;
-float RadarY = 10.f;
-bool 对局信息 = true;
-bool IsLogin = true;
-bool Enable = false;
-
-float crosshairSizeSlider = 0.0f;
-bool IsCrossHair = false;
-
-bool IsNocamerashake = false;
-bool IsFastshoot = false;
-bool IsFastSwitch = false;
-bool IsNorecoil2 = false;
-bool IsFastDrop = false;
-bool IsHitXPL = false;
-bool InstantHit = false;
-
-float carx = 0.f;
-float cary = 0.f;
-float carz = 0.f;
-bool CarFly = false;
-
-bool tudongnhay = false;
-bool chaynhanhv2 = false;
-float tocdoquay = 0.f;
-bool isSpinning = false;
-
-float DanceValue = 0.f;
-float DancerValue = 0.f;
-float rainbowSpeed = 0.02f;
-
-bool MaxStep = false;
-bool good = false;
-bool Blacksky = false;
-bool 枪械变大 = false;
-bool HitX = false;
-bool ReCo = false;
-
-float magicX = 23.f + 150.f;
-float magicY = 25.f + 150.f;
-float magicZ = 30.5f + 150.f;
-bool MagicSDK = false;
-bool Magic = false;
-
-bool textBorder = true;
-bool IsLaunch = false;
-bool ResetGuest = false;
-int SX = 0;
-
-float Gun_Size = 2.5f;
-
-bool 人物自杀 = false;
-bool 据点 = false;
-
-int currentLanguage = 0;
-
-bool WideView = false;
-bool MemoryFastScope = false;
-bool MemoryZoom = false;
-bool MemoryDamage = false;
-bool MemoryRainbow = false;
-bool MemoryCrossSpin = false;
-float MemoryZoomFov = 40.f;
-float MemoryRainbowSpeed = 1.6f;
-float MemoryCrossSpinSpeed = 180.f;
-int WideValue = 100;
-
-bool initialized = false;
-bool hideHacker = true;
-HeeeNoScreenShotView* hideesp = nullptr;
-kaddr module = Get_module_base();
-
-namespace YN {
-    int boxtype = 1;
-    int healthbartype = 0;
-    int Nationtype = 2;
-    int DirectionLineSize = 70;
-    int VehicleDirectionLineSize = 100;
-    int offscreen_range = 40;
-    int max_distance_offscreen = 400;
-    int playersdistancessize = 600;
-    bool esp_Outline = true;
-    int distance_Radar = 150;
-}
-
-long l2 = 0xFFFFF;
-int Radar = 0;
-bool 下雪特效 = false;
-sConfig Config{};
-UISlider* Auto1 = nil;
-
-int Interval = 1;
-int counter = 0;
-float AimSmooth = 5.0f;
-
-int boxtype = 1;
-int healthbartype = 0;
-int Nationtype = 2;
-int DirectionLineSize = 70;
-int VehicleDirectionLineSize = 100;
-int offscreen_range = 40;
-int max_distance_offscreen = 400;
-int playersdistancessize = 600;
-bool esp_Outline = true;
-int distance_Radar = 150;
-
-int screenWidth = 0;
-int screenHeight = 0;
-char extra[30] = {0};
-float density = -1.f;
-
 namespace {
 template <typename T>
 inline bool IsValidObjPtr(const T* ptr) {
@@ -289,7 +63,6 @@ inline bool IsFiniteVec3(const FVector& v) {
 }
 }
 
-// HMOOD__TG@i_8_f
 static bool IsAimTriggerActive(const ASTExtraPlayerCharacter* player) {
     if (!IsValidObjPtr(player)) return false;
     const bool fire = player->bIsWeaponFiring;
@@ -310,18 +83,15 @@ INI* config = nullptr;
     MenDeal = (open == YES);
 }
 
-// HMOOD__TG@i_8_f
 - (MTKView *)mtkView
 {
     return (MTKView *)self.view;
 }
 
-// HMOOD__TG@i_8_f
 - (void)loadView {
     self.view = [[MTKView alloc] initWithFrame:CGRectMake(0, 0, kWidth, kHeight)];
 }
 
-// HMOOD__TG@i_8_f
 - (void)viewDidLoad {
     [super viewDidLoad];
 
@@ -332,7 +102,6 @@ INI* config = nullptr;
     self.mtkView.clipsToBounds = YES;
 }
 
-// HMOOD__TG@i_8_f
 - (instancetype)initWithNibName:(nullable NSString *)nibNameOrNil bundle:(nullable NSBundle *)nibBundleOrNil
 {
     self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
@@ -346,7 +115,7 @@ INI* config = nullptr;
         [fileManager createFileAtPath:filePath contents:[NSData data] attributes:nil];
     }
 
-    config = ini_load((char*)filePath.UTF8String);
+    config = ini_load(filePath.UTF8String);
     _device = MTLCreateSystemDefaultDevice();
     if (!_device) return self;
 
@@ -377,7 +146,6 @@ namespace Variables {
     int ActiveTab = 1;
 }
 
-// HMOOD__TG@i_8_f
 - (void)drawInMTKView:(MTKView*)view
 {
     if (!view || !self.commandQueue) return;
@@ -449,11 +217,10 @@ namespace Variables {
     [commandBuffer commit];
 }
 
-// HMOOD__TG@i_8_f
 -(void) readIniConfig {
     if (config) {
-        ini_remove(config,(char*)"modSkin",nullptr);
-        ini_remove(config,(char*)"modSwitch",nullptr);
+        ini_remove(config, "modSkin", nullptr);
+        ini_remove(config, "modSwitch", nullptr);
     }
     imgui::ESP         = configManager::readBoolean(config, "ESP", "ESP", false);
     imgui::Health      = configManager::readBoolean(config, "ESP", "HEALTH", false);
@@ -534,12 +301,10 @@ namespace Variables {
     hideHacker = configManager::readBoolean(config, "SYSTEM", "HIDERECORD", false);
 }
 
-// HMOOD__TG@i_8_f
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size
 {
 }
 
-// HMOOD__TG@i_8_f
 - (void)updateIOWithTouchEvent:(UIEvent *)event
 {
     if (!event || !self.view) return;
@@ -562,25 +327,21 @@ namespace Variables {
     io.MouseDown[0] = hasActiveTouch;
 }
 
-// HMOOD__TG@i_8_f
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
     [self updateIOWithTouchEvent:event];
 }
 
-// HMOOD__TG@i_8_f
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
     [self updateIOWithTouchEvent:event];
 }
 
-// HMOOD__TG@i_8_f
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
     [self updateIOWithTouchEvent:event];
 }
 
-// HMOOD__TG@i_8_f
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event
 {
     [self updateIOWithTouchEvent:event];
@@ -595,7 +356,6 @@ struct sRegion {
 };
 std::vector<sRegion> trapRegions;
 
-// HMOOD__TG@i_8_f
 bool isObjectInvalid(UObject *obj) {
     if (!Tools::IsPtrValid(obj)) {
         return true;
@@ -625,7 +385,6 @@ bool isObjectInvalid(UObject *obj) {
     return false;
 }
 
-// HMOOD__TG@i_8_f
 kaddr getRealOffset(kaddr offset){
     uintptr_t base = (uintptr_t)Get_module_base();
     if (!base) return 0;
@@ -665,7 +424,6 @@ TUObjectArray gobjects;
 #define TSL_FONT_DEFAULT_SIZE 26
 static UFont *robotoFont = nullptr, *robotoTinyFont = nullptr, *tslFont = nullptr;
 
-// HMOOD__TG@i_8_f
 UWorld *GetFullWorld()
 {
     if (!IsValidObjPtr(UObject::GUObjectArray)) {
@@ -711,7 +469,6 @@ UWorld *GetFullWorld()
     return nullptr;
 }
 
-// HMOOD__TG@i_8_f
 TNameEntryArray *GetGNames() {
     uintptr_t base = (uintptr_t)Get_module_base();
     if (!base) return nullptr;
@@ -739,7 +496,6 @@ TNameEntryArray *GetGNames() {
     return ((TNameEntryArray *(*)())fnAddr)();
 }
 
-// HMOOD__TG@i_8_f
 std::vector<AActor *> getActorsSafe(UWorld* World)
 {
     if (!IsValidObjPtr(World))
@@ -776,13 +532,11 @@ std::vector<AActor *> getActorsSafe(UWorld* World)
     return ValidActors;
 }
 
-// HMOOD__TG@i_8_f
 FVector GetBoneLocationByName(ASTExtraPlayerCharacter *Actor, const char *BoneName) {
     if (!IsValidObjPtr(Actor) || !BoneName || !IsValidObjPtr(Actor->Mesh)) return FVector{0, 0, 0};
     return Actor->GetBonePos(BoneName, FVector());
 }
 
-// HMOOD__TG@i_8_f
 bool WriteAddr(void *addr, void *buffer, size_t length) {
     if (!addr || !buffer || length == 0 || !Tools::IsPtrValid(addr)) return false;
     unsigned long page_size = sysconf(_SC_PAGESIZE);
@@ -850,7 +604,6 @@ ASTExtraPlayerController *g_PlayerController = nullptr;
 
 #define W2S(w, s) UGameplayStatics::ProjectWorldToScreen(g_PlayerController, w, false, s)
 
-// HMOOD__TG@i_8_f
 FVector2D WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float PosX, float PosY,
                        FVector Size, bool &outbuff)
 {
@@ -883,7 +636,6 @@ FVector2D WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float Pos
     return vector2;
 }
 
-// HMOOD__TG@i_8_f
 FVector WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float PosX, float PosY,
                      Vector3 Size, bool &outbuff)
 {
@@ -891,7 +643,6 @@ FVector WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float PosX,
     return FVector{res.X, res.Y, 0.f};
 }
 
-// HMOOD__TG@i_8_f
 FVector2D rotateCoord(float angle, FVector2D coord) {
     float s = sin(angle * M_PI / 180.f);
     float c = cos(angle * M_PI / 180.f);
@@ -899,24 +650,20 @@ FVector2D rotateCoord(float angle, FVector2D coord) {
     return {coord.X * c + coord.Y * s, -coord.X * s + coord.Y * c};
 }
 
-// HMOOD__TG@i_8_f
 float DegreeToRadian(float degree){
     return degree * (M_PI / 180.f);
 }
 
-// HMOOD__TG@i_8_f
 void DrawFilledRectangle(AHUD *HUD, FVector2D Pos, float Width, float Height, FLinearColor Color) {
     if (!IsValidObjPtr(HUD)) return;
     HUD->DrawRect(Color, Pos.X, Pos.Y, Width, Height);
 }
 
-// HMOOD__TG@i_8_f
 void DrawLine(AHUD *HUD, FVector2D posFrom, FVector2D posTo, float Thickness, FLinearColor Color) {
     if (!IsValidObjPtr(HUD)) return;
     HUD->DrawLine(posFrom.X, posFrom.Y, posTo.X, posTo.Y, Color, Thickness);
 }
 
-// HMOOD__TG@i_8_f
 void DrawCircle(UCanvas *Canvas, int x, int y, int radius, int numsides, FLinearColor OutlineColor){
     if (!IsValidObjPtr(Canvas) || numsides <= 0) return;
     if (numsides > 127) numsides = 127;
@@ -931,13 +678,11 @@ void DrawCircle(UCanvas *Canvas, int x, int y, int radius, int numsides, FLinear
     }
 }
 
-// HMOOD__TG@i_8_f
 void DrawCircle(AHUD *HUD, int x, int y, int radius, int numsides, FLinearColor OutlineColor){
     if (!IsValidObjPtr(HUD) || !IsValidObjPtr(HUD->Canvas)) return;
     DrawCircle(HUD->Canvas, x, y, radius, numsides, OutlineColor);
 }
 
-// HMOOD__TG@i_8_f
 void *LoadFont() {
     if (!IsValidObjPtr(UObject::GUObjectArray) || !FName::GNames) {
         return nullptr;
@@ -948,7 +693,6 @@ void *LoadFont() {
     return nullptr;
 }
 
-// HMOOD__TG@i_8_f
 bool _read(kaddr addr, void *buffer, int len)
 {
     if (!addr || !buffer || len <= 0 || !IsValidAddress(addr)) return false;
@@ -963,7 +707,6 @@ bool _read(kaddr addr, void *buffer, int len)
 
 void (*orig_Broadcast)(ASTExtraPlayerController* thiz, FFatalDamageParameter* FatalDamageParameter) = nullptr;
 
-// HMOOD__TG@i_8_f
 void hk_Broadcast(ASTExtraPlayerController* thiz, FFatalDamageParameter* FatalDamageParameter)
 {
     if (!orig_Broadcast) return;
@@ -993,10 +736,8 @@ void hk_Broadcast(ASTExtraPlayerController* thiz, FFatalDamageParameter* FatalDa
 
 int glWidth = 0, glHeight = 0;
 
-// HMOOD__TG@i_8_f
 static FVector ResolveAimPosition(ASTExtraPlayerCharacter* player, ASTExtraPlayerController* controller);
 
-// HMOOD__TG@i_8_f
 ASTExtraPlayerCharacter* GetTargetByCrossDist() {
     auto* player = g_LocalPlayer;
     auto* controller = g_PlayerController;
@@ -1051,10 +792,8 @@ ASTExtraPlayerCharacter* GetTargetByCrossDist() {
     return result;
 }
 
-// HMOOD__TG@i_8_f
 auto VIP_Fov_Based() -> ASTExtraPlayerCharacter* { return GetTargetByCrossDist(); }
 
-// HMOOD__TG@i_8_f
 static void UpdateAutoFire(ASTExtraPlayerCharacter* player, ASTExtraPlayerController* controller) {
     static uintptr_t previousController = 0;
     static bool pressed = false;
@@ -1089,14 +828,10 @@ float VehicleAimConeDeg   = 8.0f;
 float VehicleAimHeightZ   = 50.0f;
 float SilentAimPingMs     = 0.0f;
 
-// HMOOD__TG@i_8_f
 static inline float Dot3(const FVector& a, const FVector& b){ return a.X*b.X + a.Y*b.Y + a.Z*b.Z; }
-// HMOOD__TG@i_8_f
 static inline float Len (const FVector& v){ return sqrtf(v.X*v.X + v.Y*v.Y + v.Z*v.Z); }
-// HMOOD__TG@i_8_f
 static inline float DegToRad(float d){ return d * 0.017453292519943295f; }
 
-// HMOOD__TG@i_8_f
 static float GetPingSeconds(APlayerController* ) {
     float ms = SilentAimPingMs;
     if (ms < 0.f)   ms = 0.f;
@@ -1104,7 +839,6 @@ static float GetPingSeconds(APlayerController* ) {
     return ms * 0.001f;
 }
 
-// HMOOD__TG@i_8_f
 static bool IsPartiallyVisible(APlayerController* PC, AActor* Other, const FVector& viewLoc){
     if (!IsValidObjPtr(PC) || !IsValidObjPtr(Other)) return false;
     if (PC->LineOfSightTo(Other, viewLoc, true)) return true;
@@ -1121,14 +855,12 @@ static bool IsPartiallyVisible(APlayerController* PC, AActor* Other, const FVect
     return false;
 }
 
-// HMOOD__TG@i_8_f
 static bool IsVisiblePoint(APlayerController* PC, AActor* Target, const FVector& from, const FVector& to) {
     (void)from;
     if (!IsValidObjPtr(PC) || !IsValidObjPtr(Target)) return false;
     return PC->LineOfSightTo(Target, to, true);
 }
 
-// HMOOD__TG@i_8_f
 static FVector GetBestBonePosVisible(ASTExtraPlayerCharacter* P, APlayerController* PC, const FVector& viewLoc){
     if (!IsValidObjPtr(P) || !IsValidObjPtr(P->Mesh)) return FVector{0,0,0};
 
@@ -1153,7 +885,6 @@ static FVector GetBestBonePosVisible(ASTExtraPlayerCharacter* P, APlayerControll
     return P->GetBonePos("pelvis", {});
 }
 
-// HMOOD__TG@i_8_f
 static FVector ResolveAimPosition(ASTExtraPlayerCharacter* player, ASTExtraPlayerController* controller) {
     if (!IsValidObjPtr(player) || !IsValidObjPtr(player->Mesh)) return FVector{0, 0, 0};
     const char* bones[] = {"Head", "neck_01", "spine_03", "pelvis"};
@@ -1164,7 +895,6 @@ static FVector ResolveAimPosition(ASTExtraPlayerCharacter* player, ASTExtraPlaye
     return GetBestBonePosVisible(player, controller, view);
 }
 
-// HMOOD__TG@i_8_f
 static ASTExtraVehicleBase* PickVehicleNearCrosshair(
     APlayerController* PC, const FVector& start, const FRotator& shotRot, float coneDeg, bool doVis)
 {
@@ -1206,7 +936,6 @@ static ASTExtraVehicleBase* PickVehicleNearCrosshair(
     return bestVeh;
 }
 
-// HMOOD__TG@i_8_f
 static ASTExtraPlayerCharacter* FindVehicleOccupant(ASTExtraVehicleBase* Veh){
     if (!IsValidObjPtr(Veh)) return nullptr;
 
@@ -1234,7 +963,6 @@ static ASTExtraPlayerCharacter* FindVehicleOccupant(ASTExtraVehicleBase* Veh){
 
 void (*orig_shoot_event)(USTExtraShootWeaponComponent *thiz, FVector start, FRotator rot, void *unk1, int unk2) = nullptr;
 
-// HMOOD__TG@i_8_f
 void shoot_event(USTExtraShootWeaponComponent *thiz, FVector start, FRotator rot, ASTExtraShootWeapon *weapon, int unk1) {
     if (!orig_shoot_event) return;
     if (!Enable || !Settings::Aimbot::Tick || Settings::Aimbot::AimMethod == 0 ||
@@ -1345,7 +1073,6 @@ void shoot_event(USTExtraShootWeaponComponent *thiz, FVector start, FRotator rot
     return orig_shoot_event(thiz, start, rot, weapon, unk1);
 }
 
-// HMOOD__TG@i_8_f
 const char *GetVehicleName(ASTExtraVehicleBase *Vehicle)
 {
     if (!IsValidObjPtr(Vehicle)) return "Vehicle";
@@ -1421,7 +1148,6 @@ const char *GetVehicleName(ASTExtraVehicleBase *Vehicle)
     }
 }
 
-// HMOOD__TG@i_8_f
 void ResetGuestAccount() {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm removeItemAtPath:[NSString stringWithFormat:@"%@/Documents/ano_tmp", NSHomeDirectory()] error:nil];
@@ -1483,7 +1209,6 @@ void ResetGuestAccount() {
     });
 }
 
-// HMOOD__TG@i_8_f
 static void ApplyMemoryReferenceOptions(ASTExtraPlayerCharacter* player, ASTExtraPlayerController* controller) {
     if (!IsValidObjPtr(player) || !IsValidObjPtr(controller)) return;
     struct Value { float original = 0.f; bool applied = false; };
@@ -1549,7 +1274,6 @@ static void ApplyMemoryReferenceOptions(ASTExtraPlayerCharacter* player, ASTExtr
     }
 }
 
-// HMOOD__TG@i_8_f
 void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
     if (!IsValidObjPtr(HUD) || ScreenWidth <= 0 || ScreenHeight <= 0) return;
 
@@ -1728,4 +1452,336 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
                                                 Yaptr.Pitch -= CpYaT.Pitch;
                                                 Yaptr.Roll = 0.f;
 
-                                                
+                                                const float maxStep = ImClamp(Settings::Aimbot::SilentAimSettings::MaxStepDeg, .3f, 8.f);
+                                                const float smooth = ImClamp(AimSmooth, 2.f, 30.f);
+                                                auto clampDelta = [](float v, float step) -> float {
+                                                    return v > step ? step : (v < -step ? -step : v);
+                                                };
+                                                localPlayer->AddControllerYawInput(clampDelta(Yaptr.Yaw / smooth, maxStep));
+                                                localPlayer->AddControllerPitchInput(clampDelta(Yaptr.Pitch / smooth, maxStep));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (IsLaunch)
+                    {
+                        if ((Enable && IsLogin) || (坐标追 && IsLogin)) {
+                            auto WeaponManagerComponent = localPlayer->WeaponManagerComponent;
+                            if (IsValidObjPtr(WeaponManagerComponent)) {
+                                auto propSlot = WeaponManagerComponent->GetCurrentUsingPropSlot();
+                                if ((int) propSlot.GetValue() >= 1 && (int) propSlot.GetValue() <= 3) {
+                                    auto CurrentWeaponReplicated = (ASTExtraShootWeapon *) WeaponManagerComponent->CurrentWeaponReplicated;
+                                    if (IsValidObjPtr(CurrentWeaponReplicated) && CurrentWeaponReplicated->IsA(ASTExtraShootWeapon::StaticClass())) {
+                                        auto ShootWeaponComponent = CurrentWeaponReplicated->ShootWeaponComponent;
+                                        if (IsValidObjPtr(ShootWeaponComponent)) {
+                                            int shoot_event_idx = 174;
+                                            auto VTable = (void **) ShootWeaponComponent->VTable;
+                                            if (!initialized) {
+                                                InitializeMemoryProtection();
+                                            }
+                                            if (Tools::IsPtrValid(VTable) && Tools::IsPtrValid(&VTable[shoot_event_idx]) && (VTable[shoot_event_idx] != (void*)shoot_event)) {
+                                                if (!orig_shoot_event) {
+                                                    orig_shoot_event = decltype(orig_shoot_event)(VTable[shoot_event_idx]);
+                                                }
+                                                WriteAddr(&VTable[shoot_event_idx], (void *)&shoot_event, sizeof(void*));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        IsLaunch = false;
+                    }
+
+                    if (!localPlayer->IsUsingGrenade()) {
+                        auto WeaponManagerComponent = localPlayer->WeaponManagerComponent;
+                        if (IsValidObjPtr(WeaponManagerComponent)) {
+                            auto propSlot = WeaponManagerComponent->GetCurrentUsingPropSlot();
+                            if ((int) propSlot.GetValue() >= 1 && (int) propSlot.GetValue() <= 3) {
+                                auto CurrentWeaponReplicated = (ASTExtraShootWeapon *) WeaponManagerComponent->CurrentWeaponReplicated;
+                                if (IsValidObjPtr(CurrentWeaponReplicated) && CurrentWeaponReplicated->IsA(ASTExtraShootWeapon::StaticClass())) {
+                                    auto ShootWeaponEntityComp = CurrentWeaponReplicated->ShootWeaponEntityComp;
+                                    auto ShootWeaponEffectComp = CurrentWeaponReplicated->ShootWeaponEffectComp;
+
+                                    auto ID = CurrentWeaponReplicated->GetWeaponID();
+                                    if (ID != 108004 && ID != 108003 && ID != 108002 && ID != 108001 && ID != 108000 && ID != 108005 && ID != 108006 && ID != 108007) {
+                                        if (IsValidObjPtr(ShootWeaponEntityComp) && IsValidObjPtr(ShootWeaponEffectComp))
+                                        {
+                                            if (IsFastSwitch) {
+                                                ShootWeaponEntityComp->SwitchFromBackpackToIdleTime = 0.0f;
+                                                ShootWeaponEntityComp->SwitchFromIdleToBackpackTime = 0.0f;
+                                            }
+
+                                            if (IsCrossHair) {
+                                                memset(&ShootWeaponEntityComp->DeviationInfo, 0, sizeof(FSDeviation));
+                                                ShootWeaponEntityComp->ShotGunCenterPerc = 0.0f;
+                                                ShootWeaponEntityComp->ShotGunVerticalSpread = 0.0f;
+                                                ShootWeaponEntityComp->ShotGunHorizontalSpread = 0.0f;
+                                                ShootWeaponEntityComp->GameDeviationFactor = 0.0f;
+                                                ShootWeaponEntityComp->GameDeviationAccuracy = 0.0f;
+                                                ShootWeaponEntityComp->CrossHairInitialSize = crosshairSizeSlider;
+                                                ShootWeaponEntityComp->CrossHairBurstSpeed = crosshairSizeSlider;
+                                                ShootWeaponEntityComp->CrossHairBurstIncreaseSpeed = crosshairSizeSlider;
+                                                ShootWeaponEntityComp->VehicleWeaponDeviationAngle = 0.0f;
+                                            }
+                                            if (IsFastshoot) {
+                                                ShootWeaponEntityComp->ShootInterval = 0.02f;
+                                            }
+                                            if (IsNocamerashake) {
+                                                ShootWeaponEffectComp->CameraShakeInnerRadius = 0.0f;
+                                                ShootWeaponEffectComp->CameraShakeOuterRadius = 0.0f;
+                                                ShootWeaponEffectComp->CameraShakFalloff = 0.0f;
+                                                ShootWeaponEntityComp->AnimationKick = 0;
+                                            }
+                                            if (IsNorecoil2) {
+                                                ShootWeaponEntityComp->RecoilKickADS = 0.0f;
+                                            }
+
+                                            if (HitX) {
+                                                ShootWeaponEntityComp->ExtraHitPerformScale = 100;
+                                                ShootWeaponEntityComp->HUDAlphaDecreaseSpeedScale = 1.f;
+                                            }
+                                            if (ReCo && IsLogin) {
+                                                ShootWeaponEntityComp->AccessoriesVRecoilFactor = 0.0f;
+                                                ShootWeaponEntityComp->AccessoriesHRecoilFactor = 0.0f;
+                                                ShootWeaponEntityComp->AccessoriesRecoveryFactor = 0.0f;
+                                            }
+
+                                            if (IsHitXPL) {
+                                                ShootWeaponEntityComp->ExtraHitPerformScale = 300;
+                                                ShootWeaponEntityComp->HUDAlphaDecreaseSpeedScale = 5.1f;
+                                            }
+
+                                            if (CarFly && IsValidObjPtr(localPlayer->CurrentVehicle)) {
+                                                static float CurrentHeight = 0.0f;
+                                                auto CurrentVehicle = localPlayer->CurrentVehicle;
+                                                auto RootComponent = static_cast<UPrimitiveComponent*>(CurrentVehicle->K2_GetRootComponent());
+
+                                                if (IsValidObjPtr(RootComponent)) {
+                                                    if (CurrentVehicle->GetMoveForwardRate() > 0) {
+                                                        FVector Velocity{0, 0, 0};
+
+                                                        if (CurrentHeight < 70000.f) {
+                                                            Velocity.X = carx;
+                                                            Velocity.Y = cary;
+                                                            Velocity.Z = carz;
+
+                                                            CurrentHeight += Velocity.Z;
+
+                                                            RootComponent->SetAllPhysicsLinearVelocity(Velocity, true);
+                                                        } else {
+                                                            Velocity.Z = 0.f;
+                                                            RootComponent->SetAllPhysicsLinearVelocity(Velocity, true);
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (chaynhanhv2 && IsValidObjPtr(localPlayer->CharacterMovement)) {
+                                                localPlayer->CharacterMovement->GravityScale = -15.f;
+                                                localPlayer->CharacterMovement->JumpZVelocity = 10.f;
+                                                localPlayer->CharacterMovement->JumpOffJumpZFactor = 10.f;
+                                            }
+
+                                            if (tudongnhay) {
+                                                localPlayer->Jump();
+                                            }
+
+                                            if (IsFastDrop && IsValidObjPtr(localPlayer->ParachuteComponent)) {
+                                                localPlayer->ParachuteComponent->CurrentFallSpeed = 8300.f;
+                                                localPlayer->ParachuteComponent->FreeFall_AcceFall = 25000.f;
+                                                localPlayer->ParachuteComponent->FreeFall_MaxFreeFallSpeed = 25000.f;
+                                                localPlayer->ParachuteComponent->FreeFall_AcceForward = 25000.f;
+                                                localPlayer->ParachuteComponent->FreeFall_MaxForwardExtraFallSpeed = 25000.f;
+
+                                                localPlayer->ParachuteComponent->Opened_AcceFall = 5000.f;
+                                                localPlayer->ParachuteComponent->Opened_MaxFreeFallSpeed = 5000.f;
+                                                localPlayer->ParachuteComponent->Opened_AcceForward = 5000.f;
+                                                localPlayer->ParachuteComponent->Opened_MaxForwardSpeed = 5000.f;
+                                                localPlayer->ParachuteComponent->Opened_MaxForwardExtraFallSpeed = 5000.f;
+
+                                                localPlayer->ParachuteComponent->AllowMaxDiatanceSqAtServer = 40000.f;
+                                                localPlayer->ParachuteComponent->MaxZAllowDistance = 40000.f;
+                                            }
+
+                                            if (据点) {
+                                                memset(&ShootWeaponEntityComp->DeviationInfo, 0, sizeof(FSDeviation));
+                                                memset(&ShootWeaponEntityComp->RecoilInfo, 0, sizeof(FSRecoilInfo));
+
+                                                ShootWeaponEntityComp->ShotGunCenterPerc = 0.0f;
+                                                ShootWeaponEntityComp->ShotGunVerticalSpread = 0.0f;
+                                                ShootWeaponEntityComp->ShotGunHorizontalSpread = 0.0f;
+                                                ShootWeaponEntityComp->GameDeviationFactor = 0.0f;
+                                                ShootWeaponEntityComp->GameDeviationAccuracy = 0.0f;
+                                                ShootWeaponEntityComp->CrossHairInitialSize = 0.0f;
+                                                ShootWeaponEntityComp->CrossHairBurstSpeed = 0.0f;
+                                                ShootWeaponEntityComp->CrossHairBurstIncreaseSpeed = 0.0f;
+                                                ShootWeaponEntityComp->VehicleWeaponDeviationAngle = 0.0f;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (枪械变大) {
+                        auto WeaponManagerComponent = localPlayer->WeaponManagerComponent;
+                        if (IsValidObjPtr(WeaponManagerComponent)) {
+                            auto Slot = WeaponManagerComponent->GetCurrentUsingPropSlot();
+                            if ((int) Slot.GetValue() >= 1 && (int) Slot.GetValue() <= 3) {
+                                auto CurrentWeaponReplicated = (ASTExtraShootWeapon *) WeaponManagerComponent->CurrentWeaponReplicated;
+                                if (IsValidObjPtr(CurrentWeaponReplicated) && IsValidObjPtr(CurrentWeaponReplicated->RootComponent)) {
+                                    auto ShootWeaponEntityComp = CurrentWeaponReplicated->ShootWeaponEntityComp;
+                                    auto ShootWeaponEffectComp = CurrentWeaponReplicated->ShootWeaponEffectComp;
+                                    if (IsValidObjPtr(ShootWeaponEntityComp) && IsValidObjPtr(ShootWeaponEffectComp)) {
+                                        CurrentWeaponReplicated->RootComponent->RelativeScale3D.Y = Gun_Size;
+                                        CurrentWeaponReplicated->RootComponent->RelativeScale3D.Z = Gun_Size;
+                                        CurrentWeaponReplicated->RootComponent->RelativeScale3D.X = Gun_Size;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    int totalEnemies = 0, totalBots = 0;
+                    for (auto* Player : PlayerCharacterList) {
+                        if (!IsValidObjPtr(Player)) continue;
+                        if (Player->PlayerKey == localPlayer->PlayerKey) continue;
+                        if (Player->TeamID == localPlayer->TeamID) continue;
+                        if (Player->bDead || Player->bHidden) continue;
+                        if (!IsValidObjPtr(Player->RootComponent)) continue;
+
+                        if (Config.ESPMenu.IgnoreBot && IsLogin) {
+                            if (Player->bEnsure) continue;
+                        }
+
+                        if (Player->bEnsure)
+                            totalBots++;
+                        else
+                            totalEnemies++;
+
+                        FVector Head = GetBoneLocationByName(Player, "Head");
+                        Head.Z += 12.5f;
+
+                        float Distance = Player->GetDistanceTo(localPlayer) / 100.f;
+                        bool IsVisible = localPlayerController->LineOfSightTo(Player, {0,0,0}, true);
+
+                        if (IsVisible) {
+                            if (Player->bEnsure) {
+                                visCol = FLinearColor(0.f, 0.5f, 0.f, 1.f);
+                            } else if (Player->Health == 0.0f) {
+                                visCol = FLinearColor(0.0f, 0.3f, 0.0f, 1.0f);
+                            } else {
+                                visCol = FLinearColor(0.f, 0.5f, 0.f, 1.f);
+                            }
+                        } else if (Player->bEnsure) {
+                            visCol = FLinearColor(1.f, 0.f, 0.f, 1.f);
+                        } else if (Player->Health == 0.0f) {
+                            visCol = FLinearColor(0.549019607f, 0.039215686f, 0.050980392f, 1.0f);
+                        } else {
+                            visCol = FLinearColor(1.f, 0.f, 0.f, 1.f);
+                        }
+
+                        if (Player->IsInvincible) {
+                            visCol = FLinearColor(1.f, 1.f, 0.f, 1.f);
+                        }
+
+                        if (std::isfinite(Distance) && Distance < 500.f) {
+                            if (Radar == 1 && IsLogin && IsValidObjPtr(localPlayer->RootComponent) && IsValidObjPtr(localPlayerController->PlayerCameraManager)) {
+                                bool out = false;
+                                struct Vector3 Pos;
+                                Pos.X = (RadarX * 10);
+                                Pos.Y = (RadarY * 13);
+                                struct Vector3 Size;
+                                Size.X = 210;
+                                Size.Y = 200;
+                                float RadarCenterX = Pos.X + (Size.X / 2.f);
+                                float RadarCenterY = Pos.Y + (Size.Y / 2.f);
+
+                                FVector MyPosition{0,0,0}, EnemyPosition{0,0,0};
+                                ASTExtraVehicleBase * CurrentVehiclea = IsValidObjPtr(Player->CurrentVehicle) ? Player->CurrentVehicle : nullptr;
+                                if (CurrentVehiclea && IsValidObjPtr(CurrentVehiclea->RootComponent)) {
+                                    MyPosition = CurrentVehiclea->RootComponent->RelativeLocation;
+                                } else {
+                                    MyPosition = Player->RootComponent->RelativeLocation;
+                                }
+                                ASTExtraVehicleBase * CurrentVehicle = IsValidObjPtr(localPlayer->CurrentVehicle) ? localPlayer->CurrentVehicle : nullptr;
+                                if (CurrentVehicle && IsValidObjPtr(CurrentVehicle->RootComponent)) {
+                                    EnemyPosition = CurrentVehicle->RootComponent->RelativeLocation;
+                                } else {
+                                    EnemyPosition = localPlayer->RootComponent->RelativeLocation;
+                                }
+
+                                FVector RadarSketch = WorldToRadar(localPlayerController->PlayerCameraManager->CameraCache.POV.Rotation.Yaw, MyPosition, EnemyPosition, Pos.X, Pos.Y, Vector3(Size.X, Size.Y, 0), out);
+
+                                DrawCircle(HUD, (int)(RadarCenterX + 0.5f), (int)(RadarCenterY + 0.5f), 100, 100, COLOR_WHITE);
+                                DrawFilledRectangle(HUD, FVector2D{RadarCenterX + 0.5f, RadarCenterY + 0.5f}, 5, 5, COLOR_YELLOW);
+                                if (!localPlayerController->LineOfSightTo(localPlayerController->PlayerCameraManager, Head, true)) {
+                                    DrawFilledRectangle(HUD, FVector2D{RadarSketch.X, RadarSketch.Y}, 5, 5, COLOR_BLUE);
+                                } else {
+                                    DrawFilledRectangle(HUD, FVector2D{RadarSketch.X, RadarSketch.Y}, 5, 5, COLOR_RED);
+                                }
+                            }
+
+                            if (Radar == 2 && IsLogin && IsValidObjPtr(localPlayerController->PlayerCameraManager)) {
+                                float lateralAngleView = (localPlayerController->ControlRotation.Yaw) - 90.f;
+
+                                FVector selfcoord = localPlayerController->PlayerCameraManager->CameraCache.POV.Location;
+                                FVector Objectcoord = Player->RootComponent->RelativeLocation;
+
+                                int Ev = 200;
+                                FVector2D radar = rotateCoord(lateralAngleView, FVector2D((selfcoord.X - Objectcoord.X) / Ev, (selfcoord.Y - Objectcoord.Y) / Ev));
+
+                                FVector2D 雷达位置 = {500,200};
+                                float 雷达大小 = 55;
+                                float half = 225.f * 雷达大小 / 100.f;
+                                Canvas->K2_DrawLine({雷达位置.X - half, 雷达位置.Y}, {雷达位置.X + half, 雷达位置.Y}, 1, FLinearColor(1.f,1.f,1.f,1.f));
+                                Canvas->K2_DrawLine({雷达位置.X, 雷达位置.Y - half}, {雷达位置.X, 雷达位置.Y + half}, 1, FLinearColor(1.f,1.f,1.f,1.f));
+                                Canvas->K2_DrawLine({雷达位置.X - half, 雷达位置.Y - half}, {雷达位置.X - half, 雷达位置.Y + half}, 1, FLinearColor(1.f,1.f,1.f,1.f));
+                                Canvas->K2_DrawLine({雷达位置.X + half, 雷达位置.Y - half}, {雷达位置.X + half, 雷达位置.Y + half}, 1, FLinearColor(1.f,1.f,1.f,1.f));
+                                Canvas->K2_DrawLine({雷达位置.X - half, 雷达位置.Y - half}, {雷达位置.X + half, 雷达位置.Y - half}, 1, FLinearColor(1.f,1.f,1.f,1.f));
+                                Canvas->K2_DrawLine({雷达位置.X - half, 雷达位置.Y + half}, {雷达位置.X + half, 雷达位置.Y + half}, 1, FLinearColor(1.f,1.f,1.f,1.f));
+
+                                DrawCircle(Canvas, (int)(雷达位置.X + radar.X * (雷达大小 / 100.f)), (int)(雷达位置.Y + radar.Y * (雷达大小 / 100.f)), 4, 20, FLinearColor(1,0,0,1));
+                            }
+                        }
+                    }
+
+                    if (Config.ESPMenu.对局信息 && IsLogin && IsValidObjPtr(GWorld) && IsValidObjPtr(GWorld->GameState)) {
+                        ASTExtraGameStateBase* GameState = (ASTExtraGameStateBase*)GWorld->GameState;
+                        if (IsValidObjPtr(GameState)) {
+                            int AlivePlayers = GameState->AlivePlayerNum;
+                            int AliveTeams = GameState->AliveTeamNum;
+                            int ElapsedTime = GameState->ElapsedTime;
+                            char buf[256];
+                            snprintf(buf, sizeof(buf), "Players: %d | Teams: %d | Time: %ds | Enemies: %d | Bots: %d",
+                                     AlivePlayers, AliveTeams, ElapsedTime, totalEnemies, totalBots);
+                            Canvas->K2_DrawText(tslFont, FString(buf), FVector2D{20.f, 40.f}, FVector2D{1.f, 1.f},
+                                                COLOR_WHITE, 1.f, COLOR_BLACK, FVector2D{0.f, 0.f},
+                                                false, true, false, COLOR_BLACK);
+                        }
+                    }
+
+                    ApplyMemoryReferenceOptions(localPlayer, localPlayerController);
+                }
+            }
+        }
+    }
+}
+
+void (*orig_DrawHUD)(AHUD *HUD) = nullptr;
+
+void hk_DrawHUD(AHUD *HUD) {
+    if (!orig_DrawHUD) return;
+    if (IsValidObjPtr(HUD) && IsValidObjPtr(HUD->Canvas)) {
+        RenderESP(HUD, HUD->Canvas->SizeX, HUD->Canvas->SizeY);
+    }
+    orig_DrawHUD(HUD);
+}
+
+@end
