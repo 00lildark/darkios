@@ -1761,9 +1761,11 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
                             char buf[256];
                             snprintf(buf, sizeof(buf), "Players: %d | Teams: %d | Time: %ds | Enemies: %d | Bots: %d",
                                      AlivePlayers, AliveTeams, ElapsedTime, totalEnemies, totalBots);
-                            Canvas->K2_DrawText(tslFont, FString(buf), FVector2D{20.f, 40.f}, FVector2D{1.f, 1.f},
-                                                COLOR_WHITE, 1.f, COLOR_BLACK, FVector2D{0.f, 0.f},
-                                                false, true, false, COLOR_BLACK);
+                            wchar_t wbuf[256] = {0};
+mbstowcs(wbuf, buf, 255);
+Canvas->K2_DrawText(tslFont, FString(wbuf), FVector2D{20.f, 40.f},
+                    COLOR_WHITE, 1.f, COLOR_BLACK, FVector2D{0.f, 0.f},
+                    false, false, false);
                         }
                     }
 
