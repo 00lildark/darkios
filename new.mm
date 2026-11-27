@@ -695,6 +695,62 @@ static void HookedProcessEvent(UObject* o, UFunction* f, void* a) {
     }
 }
 
+extern "C" void RenderNewMenuOverlay(void) {
+    if (!menu_open) return;
+    ImGuiIO& io = ImGui::GetIO();
+    if (io.DisplaySize.x < 1.f || io.DisplaySize.y < 1.f) return;
+
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f - 230.f, io.DisplaySize.y * 0.5f - 180.f),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(460.f, 360.f), ImGuiCond_FirstUseEver);
+
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.04f, 0.04f, 0.04f, 0.96f));
+    ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.08f, 0.08f, 0.08f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+
+    bool openFlag = menu_open;
+    if (ImGui::Begin("TEST MENU", &openFlag, ImGuiWindowFlags_NoCollapse)) {
+        if (ImGui::BeginTabBar("##test_menu_tabs")) {
+            if (ImGui::BeginTabItem("ESP")) {
+                ImGui::Checkbox("Boxes", &vis.boxes);
+                ImGui::Checkbox("Health", &vis.health);
+                ImGui::Checkbox("Skeleton", &vis.skeleton);
+                ImGui::Checkbox("Self Skeleton", &vis.self_skeleton);
+                ImGui::Checkbox("Names", &vis.names);
+                ImGui::Checkbox("Distance", &vis.distance);
+                ImGui::Checkbox("Snapline", &vis.snapline);
+                ImGui::Checkbox("Indicators", &vis.indicators);
+                ImGui::Checkbox("Draw Bots", &vis.draw_bots);
+                ImGui::SliderFloat("Line Width", &vis.line_width, 0.5f, 5.0f, "%.1f");
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Aimbot")) {
+                ImGui::Checkbox("Enable Aimbot", &aim.enabled);
+                ImGui::Checkbox("Silent Aim", &aim.silent);
+                ImGui::Checkbox("Show FOV", &aim.show_fov);
+                ImGui::Checkbox("Silent Show FOV", &aim.silent_show_fov);
+                ImGui::Checkbox("Prediction", &aim.prediction);
+                ImGui::Checkbox("Visibility Check", &aim.vis_check);
+                ImGui::Checkbox("Grenade Warning", &aim.grenade_warning);
+                ImGui::SliderFloat("FOV Size", &aim.fov_size, 20.f, 400.f, "%.0f");
+                ImGui::SliderFloat("Max Distance", &aim.max_distance, 50.f, 500.f, "%.0f m");
+                ImGui::SliderFloat("Smooth", &aim.smooth, 1.f, 20.f, "%.1f");
+                const char* bones[] = {"Head", "Neck", "Body", "Pelvis"};
+                ImGui::Combo("Target Bone", &aim.target_bone, bones, 4);
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
+        ImGui::Separator();
+        if (ImGui::Button("Close", ImVec2(120.f, 30.f))) {
+            openFlag = false;
+        }
+    }
+    ImGui::End();
+    ImGui::PopStyleColor(3);
+    menu_open = openFlag;
+}
+
 static void EnsureDarkIOSKeyVerified(void) {
     NSUserDefaults* defs = [NSUserDefaults standardUserDefaults];
     NSString* savedKey = [defs stringForKey:@"DARKIOS_Saved_Key_v1"];
@@ -709,12 +765,15 @@ static void EnsureDarkIOSKeyVerified(void) {
 static void ToggleMenuViaImGuiLoad(BOOL forceOpen, BOOL toggle) {
     EnsureDarkIOSKeyVerified();
     IsLogin = true;
-    BOOL nextState = toggle ? !MenDeal : forceOpen;
+    BOOL nextState = toggle ? !(BOOL)menu_open : forceOpen;
     menu_open = (bool)nextState;
+    if (nextState) {
+        MenDeal = true;
+    }
 
     dispatch_block_t applyBlock = ^{
         [[ImGuiLoad share] initTapGes];
-        [[ImGuiLoad share] setMenuVisible:nextState];
+        [[ImGuiLoad share] setMenuVisible:YES];
         if (nextState) {
             [[NSNotificationCenter defaultCenter] postNotificationName:@"MeenuOpenRequested" object:nil];
         }
