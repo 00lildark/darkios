@@ -11,25 +11,62 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 #include "imgui/imgui_internal.h"
-//#include "ESP/xor.h"
+#include "ESP/xor.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
 #include <string>
 #include <map>
 #include "ESP/Tools.h"
-// #include "ESP/Vector3.h"
-// #include "ESP/Vector2.h"
+#include "ESP/Vector3.h"
+#include "ESP/Vector2.h"
 // #include "PUBG/core/Vector/monoString.h"
 #include "SDK.hpp"
-// #include "Settings.h"
-// #include "gui/mywings/gui.hpp"
-// #include "gui/trash/hashes.hpp"
-// #include "gui/blur/blur.hpp"
-// #include "gui/trash/bytes.hpp"
+#include "Settings.h"
+#include "gui/mywings/gui.hpp"
+#include "gui/trash/hashes.hpp"
+#include "gui/blur/blur.hpp"
+#include "gui/trash/bytes.hpp"
 
 #ifndef ENCRYPT
 #define ENCRYPT(str) (str)
+#endif
+
+#ifndef ICON_MIN_FA
+#define ICON_MIN_FA 0xf000
+#endif
+#ifndef ICON_MAX_FA
+#define ICON_MAX_FA 0xf0ff
+#endif
+#ifndef ICON_FA_SAVE
+#define ICON_FA_SAVE ""
+#endif
+#ifndef ICON_FA_SEARCH
+#define ICON_FA_SEARCH ""
+#endif
+#ifndef ICON_FA_COG
+#define ICON_FA_COG ""
+#endif
+#ifndef ICON_FA_CROSSHAIRS
+#define ICON_FA_CROSSHAIRS ""
+#endif
+#ifndef ICON_FA_GHOST
+#define ICON_FA_GHOST ""
+#endif
+#ifndef ICON_FA_MOUSE
+#define ICON_FA_MOUSE ""
+#endif
+#ifndef ICON_FA_USER
+#define ICON_FA_USER ""
+#endif
+#ifndef ICON_FA_PALLET
+#define ICON_FA_PALLET ""
+#endif
+#ifndef ICON_FA_HAMMER
+#define ICON_FA_HAMMER ""
+#endif
+#ifndef ICON_FA_CODE
+#define ICON_FA_CODE ""
 #endif
 
 #define STR(str) ENCRYPT(str)
@@ -37,77 +74,6 @@ using namespace ImGui;
 using namespace SDK;
 #define ALPHA (ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_AlphaBar|ImGuiColorEditFlags_InputRGB|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoBorder)
 #define NO_ALPHA (ImGuiColorEditFlags_NoTooltip|ImGuiColorEditFlags_NoInputs|ImGuiColorEditFlags_NoLabel|ImGuiColorEditFlags_NoAlpha|ImGuiColorEditFlags_InputRGB|ImGuiColorEditFlags_Float|ImGuiColorEditFlags_NoDragDrop|ImGuiColorEditFlags_PickerHueBar|ImGuiColorEditFlags_NoBorder)
-
-struct AimSettings {
-    bool enabled = false;
-    bool silent = false;
-    bool show_fov = false;
-    bool silent_show_fov = false;
-    bool prediction = false;
-    bool vis_check = false;
-    bool silent_vis_check = false;
-    bool grenade_warning = false;
-    bool vehicle_aim = false;
-    bool closest_priority = false;
-    float fov_size = 120.f;
-    float max_distance = 300.f;
-    float silent_distance = 300.f;
-    float smooth = 2.5f;
-    float silent_smooth = 1.0f;
-    float silent_fov = 90.f;
-    int target_bone = 0;
-    int trigger_mode = 0;
-    int silent_bone = 0;
-};
-
-struct VisSettings {
-    bool boxes = false;
-    bool health = false;
-    bool skeleton = false;
-    bool names = false;
-    bool distance = false;
-    bool snapline = false;
-    bool indicators = false;
-    bool indicator_fill = false;
-    bool self_skeleton = false;
-    bool draw_bots = false;
-    float indicator_size = 20.f;
-    float indicator_width = 50.f;
-    float indicator_distance = 180.f;
-    float line_width = 1.5f;
-    float box_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float skeleton_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float snapline_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float indicator_color[4] = {1.f, 1.f, 1.f, 1.f};
-    float silent_color[4] = {1.f, 0.f, 0.f, 1.f};
-};
-
-struct ItemEspSettings {
-    bool vehicles = false;
-    bool metro_chests = false;
-    bool snow = false;
-    float max_distance = 200.f;
-};
-
-struct LootEspSettings {
-    bool enabled = false;
-    bool weapons = false;
-    bool attachments = false;
-    bool scopes = false;
-    bool ammo = false;
-    bool health = false;
-    bool backpacks = false;
-    bool helmets = false;
-    bool vests = false;
-    bool metro_items = false;
-    bool rare_only = false;
-    float max_distance = 150.f;
-};
-
-static AimSettings aim;
-static VisSettings vis;
-static ItemEspSettings itemEsp;
-static LootEspSettings lootEsp;
 
 ASTExtraPlayerCharacter* g_LocalPlayer = nullptr;
 ASTExtraPlayerController* g_PlayerController = nullptr;
