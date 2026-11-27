@@ -622,7 +622,7 @@ extern "C" void showKeyMenu(void) {
         [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
             textField.placeholder = @"DARKIOS-1D-XXXXX";
             textField.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
-            textField.autocorrectionType = UITextAutorerectionTypeNo;
+            textField.autocorrectionType = UITextAutocorrectionTypeNo;
             textField.clearButtonMode = UITextFieldViewModeWhileEditing;
         }];
 
