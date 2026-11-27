@@ -356,6 +356,19 @@ static void showVerifiedDuration5Sec(int64_t expireEpoch, bool isLifetime) {
     });
 }
 
+static NSDictionary *parseServerJSON(NSData *data) {
+    if (!data || data.length == 0) return nil;
+    NSString *raw = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!raw) return nil;
+    NSString *trimmed = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    NSRange brace = [trimmed rangeOfString:@"{"];
+    if (brace.location == NSNotFound) return nil;
+    NSData *slice = [[trimmed substringFromIndex:brace.location] dataUsingEncoding:NSUTF8StringEncoding];
+    if (!slice) return nil;
+    id parsed = [NSJSONSerialization JSONObjectWithData:slice options:0 error:nil];
+    return [parsed isKindOfClass:[NSDictionary class]] ? (NSDictionary *)parsed : nil;
+}
+
 static void startLiveStatusMonitor(NSString *activeKey) {
     if (!activeKey.length) return;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -380,10 +393,9 @@ static void startLiveStatusMonitor(NSString *activeKey) {
             [[[NSURLSession sharedSession] dataTaskWithRequest:req
                                              completionHandler:^(NSData *data, __unused NSURLResponse *resp, NSError *err) {
                 if (err || !data) return;
-                id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-                if (![parsed isKindOfClass:[NSDictionary class]]) return;
+                NSDictionary *json = parseServerJSON(data);
+                if (!json) return;
 
-                NSDictionary *json = (NSDictionary *)parsed;
                 NSString *status = [[json[@"status"] description] lowercaseString];
 
                 if ([json[@"banned"] boolValue] || [status isEqualToString:@"banned"] || [status isEqualToString:@"ban"]) {
@@ -441,7 +453,7 @@ static void handleServerStatusResponse(NSString *inputKey, NSDictionary *json, B
         return;
     }
 
-    if ([status isEqualToString:@"success"] || [status isEqualToString:@"valid"] || [status isEqualToString:@"ok"]) {
+    if ([json[@"valid"] boolValue] || [status isEqualToString:@"success"] || [status isEqualToString:@"valid"] || [status isEqualToString:@"ok"]) {
         bool lifetime = [json[@"lifetime"] boolValue];
         int64_t expireEpoch = 0;
         if ([json[@"expire_epoch"] respondsToSelector:@selector(longLongValue)]) {
@@ -498,8 +510,9 @@ static void verifyKeyWithServer(NSString *inputKey) {
 
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
     request.HTTPMethod = @"POST";
-    request.timeoutInterval = 12.0;
+    request.timeoutInterval = 20.0;
     [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
 
     NSCharacterSet *allowed = [NSCharacterSet URLQueryAllowedCharacterSet];
     NSString *postString = [NSString stringWithFormat:@"key=%@&hwid=%@",
@@ -508,20 +521,36 @@ static void verifyKeyWithServer(NSString *inputKey) {
     request.HTTPBody = [postString dataUsingEncoding:NSUTF8StringEncoding];
 
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request
-                                                                completionHandler:^(NSData *data, __unused NSURLResponse *response, NSError *error) {
+                                                                completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         if (error || !data) {
-            showAlertMessage(@"Connection Error", @"Unable to connect to server. Check your internet.", YES);
+            NSString *errMsg = error.localizedDescription.length > 0
+                ? error.localizedDescription
+                : @"Unable to connect to server. Check your internet.";
+            showAlertMessage(@"Connection Error", errMsg, YES);
             return;
         }
 
-        NSError *jsonError = nil;
-        id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
-        if (jsonError || ![parsed isKindOfClass:[NSDictionary class]]) {
-            showAlertMessage(@"Response Error", @"Failed to parse server response.", YES);
+        NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
+        NSString *rawStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+        NSString *trimmed = [rawStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+        if (trimmed.length == 0) {
+            showAlertMessage(@"Response Error",
+                             [NSString stringWithFormat:@"Empty response from server (HTTP %ld).", (long)statusCode],
+                             YES);
             return;
         }
 
-        handleServerStatusResponse(inputKey, (NSDictionary *)parsed, wasAlreadyLoggedIn);
+        NSDictionary *parsed = parseServerJSON(data);
+        if (!parsed) {
+            NSString *preview = trimmed.length > 90 ? [[trimmed substringToIndex:90] stringByAppendingString:@"..."] : trimmed;
+            showAlertMessage(@"Response Error",
+                             [NSString stringWithFormat:@"HTTP %ld: %@", (long)statusCode, preview],
+                             YES);
+            return;
+        }
+
+        handleServerStatusResponse(inputKey, parsed, wasAlreadyLoggedIn);
     }];
     [task resume];
 }
