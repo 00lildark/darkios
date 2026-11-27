@@ -1,0 +1,7 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  RewriteRule ^api/verify/?$ index.php?verify=1 [L,QSA]
+  RewriteRule ^api/sync/?$ index.php?sync=1 [L,QSA]
+</IfModule>
