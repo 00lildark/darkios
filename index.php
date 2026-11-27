@@ -1,17 +1,20 @@
 <?php
+ini_set('display_errors', '0');
+error_reporting(0);
+if (function_exists('ob_get_level')) {
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+}
+
 $dataDir = __DIR__ . '/data';
 $backupDir = $dataDir . '/backups';
 $dataFile = $dataDir . '/store.json';
 $lockFile = $dataDir . '/store.lock';
 
-if (!is_dir($dataDir)) {
-    @mkdir($dataDir, 0775, true);
-}
-if (!is_dir($backupDir)) {
-    @mkdir($backupDir, 0775, true);
-}
+if (!is_dir($dataDir)) @mkdir($dataDir, 0775, true);
+if (!is_dir($backupDir)) @mkdir($backupDir, 0775, true);
 
-// Birbaşa JSON faylına kənardan girişi bağla
 $htaccess = $dataDir . '/.htaccess';
 if (!file_exists($htaccess)) {
     @file_put_contents($htaccess, "Deny from all\n");
@@ -25,6 +28,15 @@ $defaultStore = [
     'updateModeOn' => false,
     'updatedAt' => 0
 ];
+
+function darkiosJsonOut(array $payload, int $code = 200): void {
+    http_response_code($code);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 function darkiosReadStore(string $file, string $backupDir, array $fallback): array {
     $tryFiles = [$file];
@@ -54,19 +66,15 @@ function darkiosReadStore(string $file, string $backupDir, array $fallback): arr
 
 function darkiosWriteStore(string $file, string $backupDir, array $store): bool {
     $json = json_encode($store, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-    if ($json === false) {
-        return false;
-    }
+    if ($json === false) return false;
+
     $tmp = $file . '.tmp.' . getmypid() . '.' . mt_rand(1000, 9999);
-    if (@file_put_contents($tmp, $json, LOCK_EX) === false) {
-        return false;
-    }
+    if (@file_put_contents($tmp, $json, LOCK_EX) === false) return false;
     if (!@rename($tmp, $file)) {
         @unlink($tmp);
         return false;
     }
 
-    // Hər dəyişiklikdə təhlükəsiz ehtiyat nüsxə saxla (son 30 nüsxə)
     if (is_dir($backupDir) && count($store['records']) > 0) {
         $bakFile = $backupDir . '/store_' . date('Ymd_His') . '_' . mt_rand(100, 999) . '.json';
         @file_put_contents($bakFile, $json, LOCK_EX);
@@ -81,6 +89,36 @@ function darkiosWriteStore(string $file, string $backupDir, array $store): bool 
     return true;
 }
 
+function darkiosClientIp(): string {
+    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR'] as $h) {
+        if (!empty($_SERVER[$h])) {
+            $parts = explode(',', (string)$_SERVER[$h]);
+            $ip = trim($parts[0]);
+            if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+        }
+    }
+    return '0.0.0.0';
+}
+
+function darkiosGeoLookup(string $ip): array {
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+        return ['location' => 'Local / Private Network', 'isp' => 'Local', 'asn' => 'N/A', 'vpnActive' => 'No'];
+    }
+    $ctx = stream_context_create(['http' => ['timeout' => 2]]);
+    $raw = @file_get_contents("http://ip-api.com/json/" . urlencode($ip) . "?fields=status,country,regionName,city,isp,as,proxy", false, $ctx);
+    $j = json_decode((string)$raw, true);
+    if (is_array($j) && ($j['status'] ?? '') === 'success') {
+        $loc = trim(($j['city'] ?? '') . ', ' . ($j['regionName'] ?? '') . ', ' . ($j['country'] ?? ''), ', ');
+        return [
+            'location' => $loc ?: 'Unknown',
+            'isp' => (string)($j['isp'] ?? 'Unknown'),
+            'asn' => (string)($j['as'] ?? 'Unknown'),
+            'vpnActive' => !empty($j['proxy']) ? 'Yes' : 'No'
+        ];
+    }
+    return ['location' => 'Unknown', 'isp' => 'Unknown', 'asn' => 'Unknown', 'vpnActive' => 'Unknown'];
+}
+
 function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedIds, string $uniqueField = 'key'): array {
     $deletedMap = array_flip($deletedIds);
     $map = [];
@@ -90,9 +128,7 @@ function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedId
         $id = $item['id'] ?? '';
         $uk = $item[$uniqueField] ?? $id;
         if ($id !== '' && isset($deletedMap[$id])) continue;
-        if ($uk !== '') {
-            $map[$uk] = $item;
-        }
+        if ($uk !== '') $map[$uk] = $item;
     }
 
     foreach ($incoming as $item) {
@@ -107,7 +143,6 @@ function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedId
             $existingMod = (int)($existing['modifiedAt'] ?? 0);
             $incomingMod = (int)($item['modifiedAt'] ?? 0);
             if ($incomingMod >= $existingMod) {
-                // startedAt heç vaxt itməsin
                 if (empty($item['startedAt']) && !empty($existing['startedAt'])) {
                     $item['startedAt'] = $existing['startedAt'];
                 }
@@ -119,21 +154,164 @@ function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedId
     }
 
     $result = array_values($map);
-    usort($result, function ($a, $b) {
-        return strcmp((string)($b['created'] ?? ''), (string)($a['created'] ?? ''));
-    });
+    usort($result, fn($a, $b) => strcmp((string)($b['created'] ?? ''), (string)($a['created'] ?? '')));
     return $result;
 }
 
-if (isset($_GET['sync'])) {
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-    header('Pragma: no-cache');
+// Dylib / iOS doğrulama ve gerçek cihaz bilgisi kaydı (?verify=1)
+if (isset($_GET['verify'])) {
+    $rawBody = (string)file_get_contents('php://input');
+    $input = json_decode($rawBody, true);
+    if (!is_array($input)) {
+        parse_str($rawBody, $parsedForm);
+        $input = is_array($parsedForm) && !empty($parsedForm) ? $parsedForm : $_POST;
+    }
+    if (!is_array($input)) $input = [];
+
+    $keyInput = trim((string)($input['key'] ?? ($_GET['key'] ?? '')));
+    $hwid = trim((string)($input['hwid'] ?? ($_GET['hwid'] ?? '')));
+
+    if ($keyInput === '') {
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key boşdur']);
+    }
 
     $lockFp = @fopen($lockFile, 'c+');
-    if ($lockFp) {
-        @flock($lockFp, LOCK_EX);
+    if ($lockFp) @flock($lockFp, LOCK_EX);
+
+    $store = darkiosReadStore($dataFile, $backupDir, $defaultStore);
+
+    foreach ($store['banned'] as $b) {
+        if (strcasecmp((string)($b['key'] ?? ''), $keyInput) === 0) {
+            if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+            darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Bu key banlanıb']);
+        }
     }
+
+    if (!empty($store['updateModeOn'])) {
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'UPDATE aktivdir']);
+    }
+
+    $foundIdx = -1;
+    foreach ($store['records'] as $idx => $rec) {
+        if (strcasecmp((string)($rec['key'] ?? ''), $keyInput) === 0) {
+            $foundIdx = $idx;
+            break;
+        }
+    }
+
+    if ($foundIdx === -1) {
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key tapılmadı']);
+    }
+
+    $rec = $store['records'][$foundIdx];
+    $nowMs = (int)round(microtime(true) * 1000);
+
+    if (($rec['status'] ?? '') === 'Paused') {
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key dayandırılıb']);
+    }
+
+    if (empty($rec['startedAt'])) {
+        $rec['startedAt'] = $nowMs;
+    }
+
+    if (!empty($rec['durationMs']) && ($rec['startedAt'] + (int)$rec['durationMs']) <= $nowMs) {
+        $rec['status'] = 'Expired';
+        $rec['modifiedAt'] = $nowMs;
+        $store['records'][$foundIdx] = $rec;
+        darkiosWriteStore($dataFile, $backupDir, $store);
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Key vaxtı bitib']);
+    }
+
+    $keyId = (string)$rec['id'];
+    $limit = (int)($rec['deviceLimit'] ?? 1);
+    $keyDevices = array_values(array_filter($store['devices'], fn($d) => ($d['keyId'] ?? '') === $keyId));
+    $existingDevIdx = -1;
+    foreach ($store['devices'] as $dIdx => $dev) {
+        if (($dev['keyId'] ?? '') === $keyId && $hwid !== '' && ($dev['hwid'] ?? '') === $hwid) {
+            $existingDevIdx = $dIdx;
+            break;
+        }
+    }
+
+    if ($existingDevIdx === -1 && $limit > 0 && count($keyDevices) >= $limit) {
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+        darkiosJsonOut(['status' => 'error', 'valid' => false, 'message' => 'Cihaz limiti dolub (' . $limit . ')']);
+    }
+
+    $realIp = darkiosClientIp();
+    $geo = darkiosGeoLookup($realIp);
+
+    $devicePayload = [
+        'id' => $existingDevIdx !== -1 ? $store['devices'][$existingDevIdx]['id'] : bin2hex(random_bytes(6)),
+        'keyId' => $keyId,
+        'status' => 'Active',
+        'at' => date('Y-m-d H:i:s'),
+        'modifiedAt' => $nowMs,
+        'ip' => $realIp,
+        'location' => $geo['location'],
+        'isp' => $geo['isp'],
+        'asn' => $geo['asn'],
+        'vpnActive' => $geo['vpnActive'],
+        'hwid' => $hwid ?: 'Unknown',
+        'deviceModel' => (string)($input['deviceModel'] ?? 'Unknown iPhone'),
+        'deviceName' => (string)($input['deviceName'] ?? 'iPhone'),
+        'machineId' => (string)($input['machineId'] ?? 'Unknown'),
+        'iosVersion' => (string)($input['iosVersion'] ?? 'Unknown'),
+        'systemName' => (string)($input['systemName'] ?? 'iOS'),
+        'battery' => (string)($input['battery'] ?? 'Unknown'),
+        'batteryState' => (string)($input['batteryState'] ?? 'Unknown'),
+        'lowPowerMode' => (string)($input['lowPowerMode'] ?? 'Unknown'),
+        'network' => (string)($input['network'] ?? 'Unknown'),
+        'carrier' => (string)($input['carrier'] ?? 'Unknown'),
+        'localIp' => (string)($input['localIp'] ?? 'Unknown'),
+        'architecture' => (string)($input['architecture'] ?? 'arm64e'),
+        'cpuCores' => (string)($input['cpuCores'] ?? 'Unknown'),
+        'ramTotal' => (string)($input['ramTotal'] ?? 'Unknown'),
+        'ramUsed' => (string)($input['ramUsed'] ?? 'Unknown'),
+        'storageTotal' => (string)($input['storageTotal'] ?? 'Unknown'),
+        'storageFree' => (string)($input['storageFree'] ?? 'Unknown'),
+        'screenRes' => (string)($input['screenRes'] ?? 'Unknown'),
+        'refreshRate' => (string)($input['refreshRate'] ?? 'Unknown'),
+        'brightness' => (string)($input['brightness'] ?? 'Unknown'),
+        'timezone' => (string)($input['timezone'] ?? 'Unknown'),
+        'locale' => (string)($input['locale'] ?? 'Unknown'),
+        'uptime' => (string)($input['uptime'] ?? 'Unknown'),
+        'bundleId' => (string)($input['bundleId'] ?? 'Unknown'),
+        'appVersion' => (string)($input['appVersion'] ?? 'Unknown'),
+        'jailbreakStatus' => (string)($input['jailbreakStatus'] ?? 'Non-Jailbroken')
+    ];
+
+    if ($existingDevIdx !== -1) {
+        $store['devices'][$existingDevIdx] = $devicePayload;
+    } else {
+        array_unshift($store['devices'], $devicePayload);
+    }
+
+    $rec['modifiedAt'] = $nowMs;
+    $store['records'][$foundIdx] = $rec;
+    $store['updatedAt'] = $nowMs;
+
+    darkiosWriteStore($dataFile, $backupDir, $store);
+    if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+
+    darkiosJsonOut([
+        'status' => 'ok',
+        'valid' => true,
+        'message' => 'Verified',
+        'key' => $rec['key'],
+        'type' => $rec['type'] ?? 'NORMAL',
+        'startedAt' => $rec['startedAt'],
+        'durationMs' => $rec['durationMs']
+    ]);
+}
+
+if (isset($_GET['sync'])) {
+    $lockFp = @fopen($lockFile, 'c+');
+    if ($lockFp) @flock($lockFp, LOCK_EX);
 
     $current = darkiosReadStore($dataFile, $backupDir, $defaultStore);
 
@@ -141,9 +319,7 @@ if (isset($_GET['sync'])) {
         $payload = json_decode((string)file_get_contents('php://input'), true);
         if (!is_array($payload)) {
             if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-            http_response_code(400);
-            echo json_encode(['status' => 'error', 'message' => 'Invalid JSON'], JSON_UNESCAPED_UNICODE);
-            exit;
+            darkiosJsonOut(['status' => 'error', 'message' => 'Invalid JSON'], 400);
         }
 
         $action = $payload['action'] ?? 'merge';
@@ -151,29 +327,21 @@ if (isset($_GET['sync'])) {
 
         if ($action === 'delete_key' && !empty($payload['id'])) {
             $delId = (string)$payload['id'];
-            if (!in_array($delId, $deletedIds, true)) {
-                $deletedIds[] = $delId;
-            }
+            if (!in_array($delId, $deletedIds, true)) $deletedIds[] = $delId;
             $current['records'] = array_values(array_filter($current['records'], fn($r) => ($r['id'] ?? '') !== $delId));
             $current['devices'] = array_values(array_filter($current['devices'], fn($d) => ($d['keyId'] ?? '') !== $delId));
         } elseif ($action === 'ban_key') {
             $banObj = is_array($payload['banEntry'] ?? null) ? $payload['banEntry'] : null;
             $delId = (string)($payload['id'] ?? '');
             $banKeyVal = (string)($banObj['key'] ?? ($payload['key'] ?? ''));
-            if ($delId !== '' && !in_array($delId, $deletedIds, true)) {
-                $deletedIds[] = $delId;
-            }
+            if ($delId !== '' && !in_array($delId, $deletedIds, true)) $deletedIds[] = $delId;
             if ($banKeyVal !== '') {
                 $current['records'] = array_values(array_filter($current['records'], fn($r) => ($r['key'] ?? '') !== $banKeyVal && ($r['id'] ?? '') !== $delId));
-                if ($banObj) {
-                    array_unshift($current['banned'], $banObj);
-                }
+                if ($banObj) array_unshift($current['banned'], $banObj);
             }
         } elseif ($action === 'unban_key' && !empty($payload['id'])) {
             $unbanId = (string)$payload['id'];
-            if (!in_array($unbanId, $deletedIds, true)) {
-                $deletedIds[] = $unbanId;
-            }
+            if (!in_array($unbanId, $deletedIds, true)) $deletedIds[] = $unbanId;
             $current['banned'] = array_values(array_filter($current['banned'], fn($b) => ($b['id'] ?? '') !== $unbanId));
         } elseif ($action === 'clear_all_manual' && !empty($payload['confirmClearAll'])) {
             foreach ($current['records'] as $r) {
@@ -185,7 +353,6 @@ if (isset($_GET['sync'])) {
         }
 
         $deletedIds = array_values(array_unique(array_slice($deletedIds, -5000)));
-
         $incomingRecords = is_array($payload['records'] ?? null) ? $payload['records'] : [];
         $incomingBanned = is_array($payload['banned'] ?? null) ? $payload['banned'] : [];
         $incomingDevices = is_array($payload['devices'] ?? null) ? $payload['devices'] : [];
@@ -193,7 +360,6 @@ if (isset($_GET['sync'])) {
         $mergedRecords = ($action === 'clear_all_manual')
             ? []
             : darkiosMergeByKeyOrId($current['records'], $incomingRecords, $deletedIds, 'key');
-
         $mergedBanned = darkiosMergeByKeyOrId($current['banned'], $incomingBanned, $deletedIds, 'key');
         $mergedDevices = ($action === 'clear_all_manual')
             ? []
@@ -210,19 +376,15 @@ if (isset($_GET['sync'])) {
 
         if (!darkiosWriteStore($dataFile, $backupDir, $nextStore)) {
             if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-            http_response_code(500);
-            echo json_encode(['status' => 'error', 'message' => 'Write failed'], JSON_UNESCAPED_UNICODE);
-            exit;
+            darkiosJsonOut(['status' => 'error', 'message' => 'Write failed'], 500);
         }
 
         if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-        echo json_encode(['status' => 'ok', 'data' => $nextStore], JSON_UNESCAPED_UNICODE);
-        exit;
+        darkiosJsonOut(['status' => 'ok', 'data' => $nextStore]);
     }
 
     if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
-    echo json_encode(['status' => 'ok', 'data' => $current], JSON_UNESCAPED_UNICODE);
-    exit;
+    darkiosJsonOut(['status' => 'ok', 'data' => $current]);
 }
 
 $initialStore = darkiosReadStore($dataFile, $backupDir, $defaultStore);
@@ -263,85 +425,32 @@ body{
 }
 .shell{display:flex;min-height:100vh}
 .rail{
-  width:54px;
-  flex:0 0 54px;
-  background:var(--rail);
-  border-right:1px solid var(--line);
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  padding:14px 6px;
-  gap:10px;
-  position:fixed;
-  inset:0 auto 0 0;
-  z-index:8;
+  width:54px;flex:0 0 54px;background:var(--rail);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;padding:14px 6px;gap:10px;
+  position:fixed;inset:0 auto 0 0;z-index:8;
 }
 .rail .logo{
-  height:38px;
-  width:38px;
-  border-radius:10px;
-  background:var(--panel2);
-  border:1px solid var(--line);
-  display:grid;
-  place-items:center;
-  color:var(--red);
-  margin-bottom:10px;
+  height:38px;width:38px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);
+  display:grid;place-items:center;color:var(--red);margin-bottom:10px;
 }
-.rail svg{
-  width:19px;
-  height:19px;
-  fill:none;
-  stroke:currentColor;
-  stroke-width:2.1;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-}
+.rail svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
 .rail button{
-  width:38px;
-  height:38px;
-  border:1px solid transparent;
-  border-radius:10px;
-  background:transparent;
-  color:var(--muted);
-  display:grid;
-  place-items:center;
-  cursor:pointer;
-  transition:all .18s ease;
+  width:38px;height:38px;border:1px solid transparent;border-radius:10px;
+  background:transparent;color:var(--muted);display:grid;place-items:center;cursor:pointer;transition:all .18s ease;
 }
 .rail button:hover{background:var(--panel2);color:var(--text)}
-.rail button.active{
-  background:var(--red-soft);
-  color:var(--red);
-  border-color:var(--red-border);
-}
+.rail button.active{background:var(--red-soft);color:var(--red);border-color:var(--red-border)}
 .main{margin-left:54px;min-width:0;width:calc(100% - 54px)}
 .topbar{
-  height:52px;
-  background:rgba(11,11,14,.92);
-  backdrop-filter:blur(10px);
-  border-bottom:1px solid var(--line);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 18px;
-  position:sticky;
-  top:0;
-  z-index:5;
+  height:52px;background:rgba(11,11,14,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between;padding:0 18px;position:sticky;top:0;z-index:5;
 }
 .top-left{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:800;letter-spacing:.3px}
 .top-left .dot{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 10px var(--red)}
 .top-right{display:flex;align-items:center;gap:8px}
 .top-btn,.top-select{
-  border:1px solid var(--line);
-  background:var(--panel);
-  color:var(--text);
-  padding:6px 11px;
-  border-radius:7px;
-  font-family:inherit;
-  font-size:11px;
-  font-weight:700;
-  cursor:pointer;
-  transition:.18s;
+  border:1px solid var(--line);background:var(--panel);color:var(--text);padding:6px 11px;border-radius:7px;
+  font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;transition:.18s;
 }
 .top-btn:hover,.top-select:hover{border-color:#3a3a48;background:var(--panel2)}
 .content{padding:22px 18px 36px;max-width:1520px;margin:auto}
@@ -349,160 +458,47 @@ body{
 .heading h1{font-size:21px;margin:0 0 4px;font-weight:800;letter-spacing:-.2px}
 .heading p{margin:0;color:var(--muted);font-size:12px;font-weight:600}
 .create{
-  background:var(--red);
-  color:#fff;
-  border:0;
-  border-radius:8px;
-  padding:9px 15px;
-  font-family:inherit;
-  font-size:12px;
-  font-weight:800;
-  cursor:pointer;
-  transition:.18s;
+  background:var(--red);color:#fff;border:0;border-radius:8px;padding:9px 15px;
+  font-family:inherit;font-size:12px;font-weight:800;cursor:pointer;transition:.18s;
 }
 .create:hover{background:var(--red-hover)}
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
-.metric{
-  border:1px solid var(--line);
-  border-radius:10px;
-  background:var(--panel);
-  padding:14px 16px;
-}
+.metric{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px}
 .metric.accent{border-color:var(--red-border)}
 .metric .label{font-size:10px;letter-spacing:.6px;color:var(--muted);text-transform:uppercase;font-weight:800}
 .metric strong{display:block;font-size:22px;margin-top:6px;font-weight:800;color:var(--text)}
 .metric.accent strong{color:var(--red)}
 .table-panel{border:1px solid var(--line);background:var(--panel);border-radius:10px;overflow:hidden}
-.table-head{
-  padding:12px 14px;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  border-bottom:1px solid var(--line);
-  flex-wrap:wrap;
-}
+.table-head{padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .table-title{font-size:13px;font-weight:800;display:flex;align-items:center;gap:8px}
-.count{
-  font-size:10px;
-  color:var(--red);
-  background:var(--red-soft);
-  border:1px solid var(--red-border);
-  padding:3px 7px;
-  border-radius:5px;
-  font-weight:800;
-}
+.count{font-size:10px;color:var(--red);background:var(--red-soft);border:1px solid var(--red-border);padding:3px 7px;border-radius:5px;font-weight:800}
 .filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.filters input,.filters select{
-  height:30px;
-  border:1px solid var(--line);
-  border-radius:7px;
-  background:var(--bg);
-  color:var(--text);
-  font-family:inherit;
-  font-size:11px;
-  font-weight:700;
-  padding:0 10px;
-}
+.filters input,.filters select{height:30px;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;font-size:11px;font-weight:700;padding:0 10px}
 .filters input{width:170px}
-.reset{
-  height:30px;
-  border:1px solid var(--line);
-  border-radius:7px;
-  background:var(--panel2);
-  color:var(--text);
-  font-family:inherit;
-  font-size:11px;
-  font-weight:700;
-  padding:0 11px;
-  cursor:pointer;
-}
+.reset{height:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel2);color:var(--text);font-family:inherit;font-size:11px;font-weight:700;padding:0 11px;cursor:pointer}
 .table-wrap{overflow-x:auto}
 .table{width:100%;border-collapse:collapse;min-width:860px}
-.table th{
-  height:36px;
-  background:var(--panel2);
-  color:var(--muted);
-  text-align:left;
-  font-size:10px;
-  font-weight:800;
-  letter-spacing:.5px;
-  padding:0 12px;
-  border-bottom:1px solid var(--line);
-}
-.table td{
-  height:48px;
-  border-bottom:1px solid var(--line);
-  padding:8px 12px;
-  font-size:12px;
-  font-weight:700;
-  color:var(--text);
-  white-space:nowrap;
-}
+.table th{height:36px;background:var(--panel2);color:var(--muted);text-align:left;font-size:10px;font-weight:800;letter-spacing:.5px;padding:0 12px;border-bottom:1px solid var(--line)}
+.table td{height:48px;border-bottom:1px solid var(--line);padding:8px 12px;font-size:12px;font-weight:700;color:var(--text);white-space:nowrap}
 .table tr:last-child td{border-bottom:0}
 .table tbody tr:hover{background:#14141a}
 .name{font-weight:800;color:#fff;font-size:12px}
 .desc{font-size:10px;color:var(--muted);margin-top:2px;font-weight:600}
 .key-cell{display:inline-flex;align-items:center;gap:6px}
-.copy-icon-btn{
-  width:26px;
-  height:26px;
-  border:1px solid var(--line);
-  background:var(--panel2);
-  color:var(--muted);
-  border-radius:6px;
-  display:inline-grid;
-  place-items:center;
-  cursor:pointer;
-  transition:.15s;
-  padding:0;
-}
+.copy-icon-btn{width:26px;height:26px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);border-radius:6px;display:inline-grid;place-items:center;cursor:pointer;transition:.15s;padding:0}
 .copy-icon-btn:hover{border-color:var(--red-border);color:#fff;background:#1f1f29}
 .copy-icon-btn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
-.keycode{
-  font-family:'JetBrains Mono',monospace;
-  font-size:11px;
-  font-weight:700;
-  background:var(--bg);
-  border:1px solid var(--line);
-  color:#fff;
-  border-radius:6px;
-  padding:4px 8px;
-}
-.type{
-  font-size:10px;
-  font-weight:800;
-  border:1px solid var(--line);
-  background:var(--panel2);
-  color:#fff;
-  border-radius:5px;
-  padding:3px 7px;
-}
-.status{
-  font-size:10px;
-  font-weight:800;
-  border:1px solid var(--line);
-  color:var(--muted);
-  border-radius:5px;
-  padding:3px 7px;
-}
+.keycode{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--line);color:#fff;border-radius:6px;padding:4px 8px}
+.type{font-size:10px;font-weight:800;border:1px solid var(--line);background:var(--panel2);color:#fff;border-radius:5px;padding:3px 7px}
+.status{font-size:10px;font-weight:800;border:1px solid var(--line);color:var(--muted);border-radius:5px;padding:3px 7px}
 .status.active{border-color:#343440;color:#fff;background:#1c1c24}
 .status.paused,.status.expired{border-color:var(--red-border);color:var(--red);background:var(--red-soft)}
-.dots{
-  border:1px solid var(--line);
-  background:var(--panel2);
-  color:#fff;
-  border-radius:6px;
-  width:28px;
-  height:28px;
-  font-size:15px;
-  cursor:pointer;
-}
+.dots{border:1px solid var(--line);background:var(--panel2);color:#fff;border-radius:6px;width:28px;height:28px;font-size:15px;cursor:pointer}
 .blank{padding:42px 16px;text-align:center;color:var(--muted);font-size:12px;font-weight:700}
 .view{display:none}.view.active{display:block}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.84);z-index:20;display:none;align-items:center;justify-content:center;padding:16px}
 .modal-bg.open{display:flex}
-.modal{width:min(460px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-height:90vh;overflow-y:auto}
+.modal{width:min(480px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-height:90vh;overflow-y:auto}
 .modal-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .modal-top h2{font-size:15px;margin:0;font-weight:800}
 .x{border:0;background:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1}
@@ -510,87 +506,27 @@ body{
 .field{display:flex;flex-direction:column;gap:5px}
 .field.full{grid-column:1/-1}
 .field label{font-size:11px;color:var(--muted);font-weight:700}
-.field input,.field select,.field textarea{
-  background:var(--bg);
-  border:1px solid var(--line);
-  color:#fff;
-  border-radius:8px;
-  padding:9px 10px;
-  font-family:inherit;
-  font-size:12px;
-  font-weight:700;
-}
-.clean-meta{
-  background:var(--bg);
-  border:1px solid var(--line);
-  border-radius:10px;
-  padding:10px 12px;
-  margin-bottom:12px;
-  font-size:11px;
-  color:var(--muted);
-  display:flex;
-  flex-direction:column;
-  gap:4px;
-}
+.field input,.field select,.field textarea{background:var(--bg);border:1px solid var(--line);color:#fff;border-radius:8px;padding:9px 10px;font-family:inherit;font-size:12px;font-weight:700}
+.clean-meta{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:5px}
 .clean-meta strong{color:#fff;font-family:'JetBrains Mono',monospace;font-size:11px}
 .clean-list{display:flex;flex-direction:column;gap:8px}
 .clean-btn{
-  width:100%;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  background:var(--panel2);
-  border:1px solid var(--line);
-  color:#fff;
-  border-radius:9px;
-  padding:10px 12px;
-  font-family:inherit;
-  font-size:12px;
-  font-weight:700;
-  cursor:pointer;
-  transition:.15s;
+  width:100%;display:flex;align-items:center;justify-content:space-between;background:var(--panel2);
+  border:1px solid var(--line);color:#fff;border-radius:9px;padding:10px 12px;
+  font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;text-align:left;
 }
 .clean-btn:hover{border-color:#3d3d4d;background:#1f1f29}
 .clean-btn.danger{border-color:var(--red-border);color:var(--red);background:var(--red-soft)}
 .clean-btn.danger:hover{background:rgba(230,57,70,.24)}
 .clean-row{display:grid;grid-template-columns:1fr auto;gap:7px;align-items:center}
-.info-btn{
-  width:36px;
-  height:36px;
-  border-radius:9px;
-  border:1px solid var(--line);
-  background:var(--bg);
-  color:#fff;
-  font-family:'JetBrains Mono',monospace;
-  font-size:13px;
-  font-weight:800;
-  cursor:pointer;
-  transition:.15s;
-}
+.info-btn{width:36px;height:36px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:#fff;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:800;cursor:pointer;transition:.15s}
 .info-btn:hover{border-color:var(--red-border);color:var(--red)}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}
-.secondary{
-  background:var(--panel2);
-  color:#fff;
-  border:1px solid var(--line);
-  border-radius:8px;
-  padding:8px 12px;
-  font-family:inherit;
-  font-size:11px;
-  font-weight:700;
-  cursor:pointer;
-  transition:.15s;
-}
+.secondary{background:var(--panel2);color:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;transition:.15s}
 .secondary:hover{border-color:#3b3b49;background:#20202a}
 .secondary.danger{border-color:var(--red-border);color:var(--red);background:var(--red-soft)}
 .footnote{color:var(--muted);font-size:11px;margin-top:8px;font-weight:600;line-height:1.45}
-.toast{
-  position:fixed;right:18px;bottom:18px;
-  background:#fff;color:#070709;
-  padding:10px 15px;border-radius:8px;
-  font-weight:800;font-size:12px;
-  z-index:40;display:none;
-}
+.toast{position:fixed;right:18px;bottom:18px;background:#fff;color:#070709;padding:10px 15px;border-radius:8px;font-weight:800;font-size:12px;z-index:40;display:none}
 .toast.show{display:block}
 .settings-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
 .setting-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
@@ -603,25 +539,10 @@ body{
 .slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#fff;transition:.2s;border-radius:50%}
 input:checked + .slider{background:var(--red);border-color:var(--red)}
 input:checked + .slider:before{transform:translateX(22px)}
-.update-badge{
-  display:inline-block;
-  margin-top:8px;
-  font-family:'JetBrains Mono',monospace;
-  font-size:10px;
-  font-weight:800;
-  padding:4px 8px;
-  border-radius:5px;
-  background:var(--red-soft);
-  border:1px solid var(--red-border);
-  color:var(--red);
-}
+.update-badge{display:inline-block;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:800;padding:4px 8px;border-radius:5px;background:var(--red-soft);border:1px solid var(--red-border);color:var(--red)}
 .login-screen{min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg)}
 .login-card{width:min(380px,100%);padding:30px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
-.login-logo{
-  width:46px;height:46px;border-radius:11px;
-  background:var(--red-soft);border:1px solid var(--red-border);
-  color:var(--red);display:grid;place-items:center;margin-bottom:16px;
-}
+.login-logo{width:46px;height:46px;border-radius:11px;background:var(--red-soft);border:1px solid var(--red-border);color:var(--red);display:grid;place-items:center;margin-bottom:16px}
 .login-logo svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.2}
 .login-card h1{font-size:22px;letter-spacing:1px;margin:0 0 4px;font-weight:800}
 .login-card h1 span{color:var(--red)}
@@ -851,7 +772,6 @@ let updateModeOn=typeof SERVER_INITIAL.updateModeOn==='boolean'?SERVER_INITIAL.u
 let currentLang=localStorage.getItem('darkios_lang_v4')||'en';
 let isSyncingFromServer=false;
 
-// Əgər server boş gələrsə amma bu cihazın localStorage-ında əvvəlki keylər qalıbsa, onları da serverə bərpa et
 (function hydrateFromLocalIfNeeded(){
   try{
     const localRecs=JSON.parse(localStorage.getItem('darkios_keys_v4')||'[]');
@@ -864,9 +784,7 @@ let isSyncingFromServer=false;
           added++;
         }
       });
-      if(added>0){
-        setTimeout(()=>pushToServer('merge'),300);
-      }
+      if(added>0)setTimeout(()=>pushToServer('merge'),300);
     }
   }catch{}
 })();
@@ -942,6 +860,15 @@ function saveLocalCache(){
   }catch{}
 }
 
+function safeParseJsonText(raw){
+  if(typeof raw!=='string')return null;
+  const trimmed=raw.trim();
+  if(!trimmed)return null;
+  const start=trimmed.search(/[\{\[]/);
+  if(start===-1)return null;
+  try{return JSON.parse(trimmed.slice(start))}catch{return null}
+}
+
 async function pushToServer(action='merge',extra={}){
   if(isSyncingFromServer)return;
   try{
@@ -957,18 +884,17 @@ async function pushToServer(action='merge',extra={}){
         ...extra
       })
     });
-    if(res.ok){
-      const json=await res.json();
-      if(json&&json.status==='ok'&&json.data){
-        isSyncingFromServer=true;
-        if(Array.isArray(json.data.records))records=json.data.records;
-        if(Array.isArray(json.data.banned))banned=json.data.banned;
-        if(Array.isArray(json.data.devices))deviceSessions=json.data.devices;
-        if(typeof json.data.updateModeOn==='boolean')updateModeOn=json.data.updateModeOn;
-        saveLocalCache();
-        renderAll();
-        isSyncingFromServer=false;
-      }
+    const txt=await res.text();
+    const json=safeParseJsonText(txt);
+    if(res.ok&&json&&json.status==='ok'&&json.data){
+      isSyncingFromServer=true;
+      if(Array.isArray(json.data.records))records=json.data.records;
+      if(Array.isArray(json.data.banned))banned=json.data.banned;
+      if(Array.isArray(json.data.devices))deviceSessions=json.data.devices;
+      if(typeof json.data.updateModeOn==='boolean')updateModeOn=json.data.updateModeOn;
+      saveLocalCache();
+      renderAll();
+      isSyncingFromServer=false;
     }
   }catch{
     isSyncingFromServer=false;
@@ -983,9 +909,9 @@ function persist(action='merge',extra={}){
 async function pullFromServer(showToast=false){
   try{
     const res=await fetch('?sync=1&_='+Date.now(),{cache:'no-store'});
-    if(!res.ok)return;
-    const json=await res.json();
-    if(json&&json.status==='ok'&&json.data){
+    const txt=await res.text();
+    const json=safeParseJsonText(txt);
+    if(res.ok&&json&&json.status==='ok'&&json.data){
       isSyncingFromServer=true;
       if(Array.isArray(json.data.records))records=json.data.records;
       if(Array.isArray(json.data.banned))banned=json.data.banned;
@@ -1018,12 +944,8 @@ function copyTextValue(val){
 }
 function fallbackCopyText(text){
   const ta=document.createElement('textarea');
-  ta.value=text;
-  ta.style.position='fixed';
-  ta.style.opacity='0';
-  document.body.appendChild(ta);
-  ta.focus();
-  ta.select();
+  ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.focus();ta.select();
   try{document.execCommand('copy');notify('Copied')}catch{}
   document.body.removeChild(ta);
 }
@@ -1101,17 +1023,11 @@ function checkStates(){
   const now=Date.now();
   records.forEach(r=>{
     if(r.pauseType==='temp' && r.pauseUntil && r.pauseUntil<=now){
-      r.pauseType=null;
-      r.pauseUntil=null;
-      r.status='Active';
-      r.modifiedAt=now;
-      changed=true;
+      r.pauseType=null;r.pauseUntil=null;r.status='Active';r.modifiedAt=now;changed=true;
     }
     if(r.startedAt && r.durationMs && r.status==='Active'){
       if((r.startedAt+r.durationMs)<=now){
-        r.status='Expired';
-        r.modifiedAt=now;
-        changed=true;
+        r.status='Expired';r.modifiedAt=now;changed=true;
       }
     }
   });
@@ -1185,29 +1101,21 @@ function toggleUpdateMode(checked){
     let pausedCount=0;
     records.forEach(r=>{
       if(r.status==='Active'){
-        r.status='Paused';
-        r.pauseType='update';
-        r.pauseUntil=null;
-        r.modifiedAt=now;
-        pausedCount++;
+        r.status='Paused';r.pauseType='update';r.pauseUntil=null;r.modifiedAt=now;pausedCount++;
       }
     });
-    persist('merge');renderAll();
-    notify(`UPDATE!!! ON (${pausedCount})`);
+    persist('merge');renderAll();notify(`UPDATE!!! ON (${pausedCount})`);
   }else{
     updateModeOn=false;
     let restoredCount=0;
     records.forEach(r=>{
       if(r.status==='Paused'&&r.pauseType==='update'){
-        r.pauseType=null;
-        r.pauseUntil=null;
+        r.pauseType=null;r.pauseUntil=null;
         r.status=(r.startedAt&&r.durationMs&&(r.startedAt+r.durationMs<=now))?'Expired':'Active';
-        r.modifiedAt=now;
-        restoredCount++;
+        r.modifiedAt=now;restoredCount++;
       }
     });
-    persist('merge');renderAll();
-    notify(`UPDATE!!! OFF (${restoredCount})`);
+    persist('merge');renderAll();notify(`UPDATE!!! OFF (${restoredCount})`);
   }
 }
 
@@ -1217,22 +1125,10 @@ function closeModal(){$('#modalBg').classList.remove('open')}
 
 function showTurkishInfo(topic){
   const infos={
-    addTime:{
-      title:'Zaman Ekleme (+)',
-      text:'Seçili anahtarın süresine istediğin miktarda dakika, saat veya gün ekler. Süresi dolmuş bir anahtara zaman eklersen yeniden aktif hale gelir.'
-    },
-    subTime:{
-      title:'Zaman Çıkarma (-)',
-      text:'Seçili anahtarın kalan süresinden girdiğin miktarda dakika, saat veya gün düşürür. Süre sıfırlanırsa anahtar süresi dolmuş (Expired) duruma geçer.'
-    },
-    addDevice:{
-      title:'Cihaz Sınırı Ekleme (+)',
-      text:'Anahtara bağlanabilecek maksimum cihaz/IP sayısını girdiğin sayı kadar artırır.'
-    },
-    subDevice:{
-      title:'Cihaz Sınırı Çıkarma (-)',
-      text:'Anahtarın maksimum cihaz/IP limitini girdiğin sayı kadar azaltır (en az 1 olarak kalır).'
-    }
+    addTime:{title:'Zaman Ekleme (+)',text:'Seçili anahtarın süresine istediğin miktarda dakika, saat veya gün ekler.'},
+    subTime:{title:'Zaman Çıkarma (-)',text:'Seçili anahtarın kalan süresinden girdiğin miktarda dakika, saat veya gün düşürür.'},
+    addDevice:{title:'Cihaz Sınırı Ekleme (+)',text:'Anahtara bağlanabilecek maksimum cihaz/IP sayısını girdiğin sayı kadar artırır.'},
+    subDevice:{title:'Cihaz Sınırı Çıkarma (-)',text:'Anahtarın maksimum cihaz/IP limitini girdiğin sayı kadar azaltır (en az 1 kalır).'}
   };
   const info=infos[topic]||{title:'Bilgi',text:'İşlem açıklaması.'};
   modal(info.title,`<p class="footnote" style="font-size:12px;color:#fff;margin-top:0">${esc(info.text)}</p>
@@ -1269,30 +1165,19 @@ function toggleGenDuration(){
 
 function createRecord(e){
   e.preventDefault();
-  const type=$('#newType').value;
-  const unit=$('#newDurationUnit').value;
-  const val=$('#newDurationValue').value;
-  const prefix=$('#newPrefix').value;
-  const customKey=$('#newCustomKey').value;
-  const name=($('#newName').value||'').trim()||'Key';
-  const desc=($('#newDesc').value||'').trim()||'—';
-  const durationMs=durationToMs(unit,val);
-  const now=Date.now();
+  const type=$('#newType').value,unit=$('#newDurationUnit').value,val=$('#newDurationValue').value;
+  const prefix=$('#newPrefix').value,customKey=$('#newCustomKey').value;
+  const name=($('#newName').value||'').trim()||'Key',desc=($('#newDesc').value||'').trim()||'—';
+  const durationMs=durationToMs(unit,val),now=Date.now();
 
   const r={
-    id:uid(),
-    name,
-    description:desc,
-    type,
+    id:uid(),name,description:desc,type,
     status:updateModeOn?'Paused':'Active',
-    pauseType:updateModeOn?'update':null,
-    pauseUntil:null,
+    pauseType:updateModeOn?'update':null,pauseUntil:null,
     deviceLimit:+($('#newDeviceLimit').value||1),
     created:new Date().toISOString().slice(0,16).replace('T',' '),
-    modifiedAt:now,
-    key:buildKeyValue({type,prefix,unit,val,customKey}),
-    durationMs,
-    startedAt:null
+    modifiedAt:now,key:buildKeyValue({type,prefix,unit,val,customKey}),
+    durationMs,startedAt:null
   };
   records.unshift(r);persist('merge');closeModal();renderAll();notify('OK');
   modal('Key Created',`<div class="key-cell" style="width:100%"><button type="button" class="copy-icon-btn" style="width:36px;height:36px;flex:0 0 36px" title="Copy" onclick="copyTextValue($('#createdKey').value)">${COPY_ICON_SVG}</button><input style="width:100%;background:#070709;color:#fff;border:1px solid #24242f;padding:10px;border-radius:7px;font-family:'JetBrains Mono',monospace" id="createdKey" value="${esc(r.key)}" readonly></div>
@@ -1300,6 +1185,99 @@ function createRecord(e){
       <button class="secondary" onclick="copyTextValue($('#createdKey').value)">Copy</button>
       <button class="create" onclick="closeModal()">Done</button>
     </div>`);
+}
+
+function openDeviceInfoModal(keyId){
+  const r=records.find(x=>x.id===keyId);
+  if(!r)return;
+  const list=deviceSessions.filter(d=>d.keyId===keyId);
+  modal(`Real Devices (${list.length})`,`
+    <div class="clean-meta">
+      <div><strong>${esc(r.key)}</strong></div>
+      <div>Connected real devices: <span>${list.length}</span></div>
+    </div>
+    <div class="field" style="margin-bottom:10px">
+      <label>Cihaz axtarışı (model, IP, iOS, şəhər, HWID, batareya)</label>
+      <input id="devSearchInput" placeholder="Məs: iPhone 16 Pro, 185., iOS 26..." oninput="filterDeviceList()">
+    </div>
+    <div id="devInfoList" class="clean-list"></div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="rowMenu('${keyId}')">Back</button>
+    </div>
+  `);
+  window.__currentKeyDevices=list;
+  renderFilteredDevices(list);
+}
+
+function filterDeviceList(){
+  const q=($('#devSearchInput')?.value||'').trim().toLowerCase();
+  const all=window.__currentKeyDevices||[];
+  const filtered=!q?all:all.filter(d=>Object.values(d).some(v=>String(v??'').toLowerCase().includes(q)));
+  renderFilteredDevices(filtered);
+}
+
+function renderFilteredDevices(list){
+  const wrap=$('#devInfoList');
+  if(!wrap)return;
+  if(!list.length){
+    wrap.innerHTML=`<div class="blank">Bu key ilə daxil olan cihaz tapılmadı.</div>`;
+    return;
+  }
+  wrap.innerHTML=list.map((d,i)=>`
+    <button type="button" class="clean-btn" onclick="showSingleDeviceDetails(${i})">
+      <span><strong>${esc(d.deviceModel||'Device')}</strong> · ${esc(d.battery||'—')} · ${esc(d.iosVersion||'—')}</span>
+      <span>${esc(d.ip||'—')}</span>
+    </button>
+  `).join('');
+  window.__filteredDevices=list;
+}
+
+function showSingleDeviceDetails(index){
+  const d=(window.__filteredDevices||[])[index];
+  if(!d)return;
+  const rows=[
+    ['Public IP Address',d.ip],
+    ['Location',d.location],
+    ['ISP / Provider',d.isp],
+    ['ASN',d.asn],
+    ['VPN / Proxy',d.vpnActive],
+    ['Network Type',d.network],
+    ['Carrier',d.carrier],
+    ['Local IP',d.localIp],
+    ['Device Model',d.deviceModel],
+    ['Machine ID',d.machineId],
+    ['Device Name',d.deviceName],
+    ['iOS Version',d.iosVersion],
+    ['System Name',d.systemName],
+    ['Battery Level',d.battery],
+    ['Battery State',d.batteryState],
+    ['Low Power Mode',d.lowPowerMode],
+    ['HWID',d.hwid],
+    ['Architecture',d.architecture],
+    ['CPU Cores',d.cpuCores],
+    ['Total RAM',d.ramTotal],
+    ['Used RAM',d.ramUsed],
+    ['Total Storage',d.storageTotal],
+    ['Free Storage',d.storageFree],
+    ['Screen Resolution',d.screenRes],
+    ['Refresh Rate',d.refreshRate],
+    ['Brightness',d.brightness],
+    ['Timezone',d.timezone],
+    ['Locale',d.locale],
+    ['Uptime',d.uptime],
+    ['Bundle ID',d.bundleId],
+    ['App Version',d.appVersion],
+    ['Jailbreak Status',d.jailbreakStatus],
+    ['Last Seen',d.at]
+  ];
+  modal(`${d.deviceModel||'Device'} — Info`,`
+    <div class="clean-meta">
+      ${rows.map(([k,v])=>`<div><span>${esc(k)}:</span> <strong>${esc(v??'—')}</strong></div>`).join('')}
+    </div>
+    <div class="modal-actions">
+      <button class="create" onclick="closeModal()">Close</button>
+    </div>
+  `);
 }
 
 function rowMenu(id){
@@ -1313,7 +1291,7 @@ function rowMenu(id){
 
     <div class="clean-list">
       <button class="clean-btn" onclick="copyKey('${id}')"><span>Copy Key</span><span>Copy</span></button>
-      <button class="clean-btn" onclick="simulateConnect('${id}')"><span>Simulate Device Connect</span><span>Start Timer</span></button>
+      <button class="clean-btn" onclick="openDeviceInfoModal('${id}')"><span>Device Info & Search</span><span>Info</span></button>
 
       <div class="clean-row">
         <button class="clean-btn" onclick="customTimeModal('${id}','add')"><span>+ Add Custom Time</span><span>Custom</span></button>
@@ -1350,26 +1328,10 @@ function rowMenu(id){
 function copyKey(id){const r=records.find(x=>x.id===id);if(r)copyTextValue(r.key)}
 function copyBannedKey(id){const b=banned.find(x=>x.id===id);if(b)copyTextValue(b.key)}
 
-function simulateConnect(id){
-  const r=records.find(x=>x.id===id);if(!r)return;
-  const now=Date.now();
-  if(!r.startedAt){
-    r.startedAt=now;
-    notify('Timer started');
-  }
-  r.modifiedAt=now;
-  const ip='192.168.1.'+(Math.floor(Math.random()*200)+10);
-  deviceSessions.unshift({id:uid(),keyId:id,ip,status:'Active',at:new Date().toLocaleString(),modifiedAt:now});
-  persist('merge');renderAll();rowMenu(id);
-}
-
 function customDeviceModal(id,mode){
   const r=records.find(x=>x.id===id);if(!r)return;
   modal(mode==='add'?'+ Add Custom Device Limit':'- Remove Custom Device Limit',`
-    <div class="field">
-      <label>Custom device count</label>
-      <input id="customDevAmt" type="number" min="1" value="1">
-    </div>
+    <div class="field"><label>Custom device count</label><input id="customDevAmt" type="number" min="1" value="1"></div>
     <div class="modal-actions">
       <button class="secondary" onclick="rowMenu('${id}')">Back</button>
       <button class="create" onclick="applyCustomDevice('${id}','${mode}')">Apply</button>
@@ -1407,21 +1369,14 @@ function applyTimeAdjust(id,mode){
   const delta=amt*(unit==='m'?60000:unit==='h'?3600000:86400000);
   const now=Date.now();
   if(!r.durationMs){
-    if(mode==='add'){
-      r.startedAt=r.startedAt||now;
-      r.durationMs=delta;
-    }
+    if(mode==='add'){r.startedAt=r.startedAt||now;r.durationMs=delta;}
   }else{
     if(mode==='add'){
       r.durationMs+=delta;
-      if(r.status==='Expired'&&(r.startedAt||now)+r.durationMs>now){
-        r.status='Active';
-      }
+      if(r.status==='Expired'&&(r.startedAt||now)+r.durationMs>now)r.status='Active';
     }else{
       r.durationMs=Math.max(0,r.durationMs-delta);
-      if(r.startedAt&&(r.startedAt+r.durationMs)<=now){
-        r.status='Expired';
-      }
+      if(r.startedAt&&(r.startedAt+r.durationMs)<=now)r.status='Expired';
     }
   }
   r.modifiedAt=now;
@@ -1430,10 +1385,7 @@ function applyTimeAdjust(id,mode){
 
 function pauseIndefinite(id){
   const r=records.find(x=>x.id===id);if(!r)return;
-  r.status='Paused';
-  r.pauseType='manual';
-  r.pauseUntil=null;
-  r.modifiedAt=Date.now();
+  r.status='Paused';r.pauseType='manual';r.pauseUntil=null;r.modifiedAt=Date.now();
   persist('merge');renderAll();closeModal();notify('Paused');
 }
 
@@ -1456,18 +1408,14 @@ function applyTimedPause(id){
   const unit=$('#pUnit').value;
   const ms=amt*(unit==='m'?60000:unit==='h'?3600000:86400000);
   const now=Date.now();
-  r.status='Paused';
-  r.pauseType='temp';
-  r.pauseUntil=now+ms;
-  r.modifiedAt=now;
+  r.status='Paused';r.pauseType='temp';r.pauseUntil=now+ms;r.modifiedAt=now;
   persist('merge');renderAll();closeModal();notify('Temp paused');
 }
 
 function resumeKey(id){
   const r=records.find(x=>x.id===id);if(!r)return;
   const now=Date.now();
-  r.pauseType=null;
-  r.pauseUntil=null;
+  r.pauseType=null;r.pauseUntil=null;
   r.status=(r.startedAt&&r.durationMs&&(r.startedAt+r.durationMs<=now))?'Expired':'Active';
   r.modifiedAt=now;
   persist('merge');renderAll();closeModal();notify('Resumed');
@@ -1488,39 +1436,20 @@ function deleteRecord(id){
 
 function generateKeys(){
   const n=Math.max(1,Math.min(100,+$('#genCount').value||1));
-  const name=($('#genName').value||'').trim()||'Key';
-  const desc=($('#genDesc').value||'').trim()||'—';
-  const type=$('#genType').value;
-  const unit=$('#genDurationUnit').value;
-  const val=$('#genDurationValue').value;
-  const prefix=$('#genPrefix').value;
-  const customKey=$('#genCustomKey').value;
-  const durationMs=durationToMs(unit,val);
-  const now=Date.now();
-  const out=[];
+  const name=($('#genName').value||'').trim()||'Key',desc=($('#genDesc').value||'').trim()||'—';
+  const type=$('#genType').value,unit=$('#genDurationUnit').value,val=$('#genDurationValue').value;
+  const prefix=$('#genPrefix').value,customKey=$('#genCustomKey').value;
+  const durationMs=durationToMs(unit,val),now=Date.now(),out=[];
 
   for(let i=0;i<n;i++){
-    const keyVal=buildKeyValue({
-      type,
-      prefix,
-      unit,
-      val,
-      customKey:(n===1&&customKey.trim())?customKey:''
-    });
+    const keyVal=buildKeyValue({type,prefix,unit,val,customKey:(n===1&&customKey.trim())?customKey:''});
     const r={
-      id:uid(),
-      name,
-      description:desc,
-      type,
+      id:uid(),name,description:desc,type,
       status:updateModeOn?'Paused':'Active',
-      pauseType:updateModeOn?'update':null,
-      pauseUntil:null,
+      pauseType:updateModeOn?'update':null,pauseUntil:null,
       deviceLimit:+$('#genDevices').value,
       created:new Date().toISOString().slice(0,16).replace('T',' '),
-      modifiedAt:now,
-      key:keyVal,
-      durationMs,
-      startedAt:null
+      modifiedAt:now,key:keyVal,durationMs,startedAt:null
     };
     records.unshift(r);out.push(r.key);
   }
@@ -1542,8 +1471,7 @@ function openBan(){
 }
 function banManual(e){
   e.preventDefault();
-  const keyVal=$('#banValue').value.trim();
-  const existing=records.find(r=>r.key===keyVal);
+  const keyVal=$('#banValue').value.trim(),existing=records.find(r=>r.key===keyVal);
   const banEntry={id:uid(),key:keyVal,reason:($('#banReason').value||'').trim()||'Banned',date:new Date().toLocaleString(),modifiedAt:Date.now()};
   banned.unshift(banEntry);
   records=records.filter(r=>r.key!==keyVal);
@@ -1559,7 +1487,7 @@ function renderBanned(){
 }
 function unban(id){banned=banned.filter(x=>x.id!==id);persist('unban_key',{id});renderAll()}
 function clearAllKeys(){
-  if(!confirm('Bütün keyləri silmək istədiyinə əminsən?'))return;
+  if(!confirm('Silmek istediğine emin misin?'))return;
   records=[];deviceSessions=[];updateModeOn=false;
   persist('clear_all_manual',{confirmClearAll:true});renderAll();notify('Cleared');
 }
@@ -1569,8 +1497,7 @@ function importTxt(file){
   if(!file)return;const reader=new FileReader();
   reader.onload=()=>{
     const lines=String(reader.result).split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-    let added=0;
-    const now=Date.now();
+    let added=0;const now=Date.now();
     for(const key of lines){
       if(records.some(r=>r.key===key))continue;
       records.unshift({id:uid(),name:'Key',description:'—',type:'NORMAL',status:updateModeOn?'Paused':'Active',pauseType:updateModeOn?'update':null,pauseUntil:null,deviceLimit:1,created:new Date().toISOString().slice(0,16).replace('T',' '),modifiedAt:now,key,durationMs:null,startedAt:null});
