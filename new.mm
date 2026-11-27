@@ -11,18 +11,18 @@
 #include "imgui.h"
 #include "imgui_impl_metal.h"
 #include "imgui/imgui_internal.h"
-#include "PUBG/core/ue4/xor.h"
+#include "ESP/xor.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
 #include <string>
 #include <map>
-#include "PUBG/core/Vector/Tools.h"
-#include "PUBG/core/Vector/Vector3.h"
-#include "PUBG/core/Vector/Vector2.h"
-#include "PUBG/core/Vector/monoString.h"
+#include "ESP/Tools.h"
+#include "ESP/Vector3.h"
+#include "ESP/Vector2.h"
+// #include "PUBG/core/Vector/monoString.h"
 #include "SDK.hpp"
-#include "Settings.h"
+// #include "Settings.h"
 #include "gui/mywings/gui.hpp"
 #include "gui/trash/hashes.hpp"
 #include "gui/blur/blur.hpp"
