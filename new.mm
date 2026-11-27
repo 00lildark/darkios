@@ -18,15 +18,15 @@
 #include <string>
 #include <map>
 #include "ESP/Tools.h"
-#include "ESP/Vector3.h"
-#include "ESP/Vector2.h"
+// #include "ESP/Vector3.h"
+// #include "ESP/Vector2.h"
 // #include "PUBG/core/Vector/monoString.h"
 #include "SDK.hpp"
 // #include "Settings.h"
-#include "gui/mywings/gui.hpp"
-#include "gui/trash/hashes.hpp"
-#include "gui/blur/blur.hpp"
-#include "gui/trash/bytes.hpp"
+// #include "gui/mywings/gui.hpp"
+// #include "gui/trash/hashes.hpp"
+// #include "gui/blur/blur.hpp"
+// #include "gui/trash/bytes.hpp"
 
 #define STR(str) ENCRYPT(str)
 using namespace ImGui;
@@ -39,6 +39,59 @@ ASTExtraPlayerController* g_PlayerController = nullptr;
 UFont* tslFont = nullptr;
 int enemyCount = 0;
 bool menu_open = false;
+
+static ImGuiDrawView *g_ImGuiDrawView = nil;
+static UIWindow *g_ImGuiWindow = nil;
+
+extern "C" void OpenNewMenu(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!g_ImGuiDrawView) {
+            g_ImGuiDrawView = [[ImGuiDrawView alloc] init];
+        }
+        menu_open = !menu_open;
+        [ImGuiDrawView showChange:menu_open];
+
+        UIWindowScene *activeScene = nil;
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive && [scene isKindOfClass:[UIWindowScene class]]) {
+                    activeScene = (UIWindowScene *)scene;
+                    break;
+                }
+            }
+        }
+
+        if (!g_ImGuiWindow) {
+            CGRect bounds = activeScene ? activeScene.coordinateSpace.bounds : [UIScreen mainScreen].bounds;
+            if (@available(iOS 13.0, *)) {
+                g_ImGuiWindow = activeScene ? [[UIWindow alloc] initWithWindowScene:activeScene] : [[UIWindow alloc] initWithFrame:bounds];
+            } else {
+                g_ImGuiWindow = [[UIWindow alloc] initWithFrame:bounds];
+            }
+            g_ImGuiWindow.frame = bounds;
+            g_ImGuiWindow.backgroundColor = [UIColor clearColor];
+            if (@available(iOS 13.0, *)) {
+                g_ImGuiWindow.windowLevel = UIWindowLevelAlert + 1;
+            } else {
+                g_ImGuiWindow.windowLevel = UIWindowLevelStatusBar + 1;
+            }
+            g_ImGuiWindow.rootViewController = g_ImGuiDrawView;
+        } else if (activeScene && g_ImGuiWindow.windowScene != activeScene) {
+            if (@available(iOS 13.0, *)) {
+                g_ImGuiWindow.windowScene = activeScene;
+            }
+            g_ImGuiWindow.frame = activeScene.coordinateSpace.bounds;
+        }
+
+        g_ImGuiDrawView.view.frame = g_ImGuiWindow.bounds;
+        [g_ImGuiDrawView.view setUserInteractionEnabled:menu_open];
+        g_ImGuiWindow.userInteractionEnabled = menu_open;
+        g_ImGuiWindow.hidden = !menu_open;
+        if (menu_open) {
+            [g_ImGuiWindow makeKeyAndVisible];
+        }
+    });
+}
 
 void (*orig_shoot_event)(USTExtraShootWeaponComponent*, FVector, FRotator, ASTExtraShootWeapon*, int) = nullptr;
 void (*orig_throw_grenade)(ASTExtraWeapon*, FVector, FRotator) = nullptr;
