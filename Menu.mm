@@ -131,6 +131,8 @@ namespace imgui {
 }
 
 extern void ResetGuestAccount();
+extern "C" void OpenNewMenu(void);
+extern "C" void RenderNewMenuOverlay(void);
 
 extern ImFont* mainFont;
 
@@ -1735,8 +1737,10 @@ namespace CyberMenu {
                 configManager::putBoolean(config, "ESP", left[i].key, *left[i].value);
         }
         static bool unavailable = false;
+        static bool testMenuTrigger = false;
         Row right[] = {{"DRAW BOXES", "##v_boxes", &imgui::Boxes, "BOXES", 3},
                        {"DRAW BONES", "##v_bones", &imgui::Bone, "BONE", Bone},
+                       {"TEST MENU", "##v_test_menu", &testMenuTrigger, nullptr, Gear},
                        {"HIDE BOTS", "##v_bots", &imgui::HideBot, nullptr, Robot},
                        {"ENEMY COUNT", "##v_count", &imgui::EnemyCount, "ENEMY_COUNT", 5},
                        {"PLAYER TEAM ID", "##v_team", &imgui::TeamID, "TEAM_ID", Shield},
@@ -1744,12 +1748,18 @@ namespace CyberMenu {
                        {"LOOTBOX", "##v_loot", &imgui::Lootbox, "LOOTBOX", Loot},
                        {"ITEMS ESP", "##v_items", &imgui::Items, "ITEMS", Items},
                        {"VEHICLE ESP", "##v_vehicle", &imgui::Vehicle, "VEHICLE", Car}};
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < 10; ++i) {
             Row& r = right[i];
-            bool changed = toggle(c, r.label, r.id, r.value ? r.value : &unavailable, 633, 215 + i * 37.f,
-                                  329, r.glyph, r.value != nullptr);
-            if (changed && r.key)
+            const bool isTestMenuRow = (strcmp(r.id, "##v_test_menu") == 0);
+            const bool isAvailable = isTestMenuRow ? true : (r.value != nullptr);
+            bool changed = toggle(c, r.label, r.id, r.value ? r.value : &unavailable, 633, 215 + i * 33.f,
+                                  329, r.glyph, isAvailable);
+            if (changed && isTestMenuRow) {
+                testMenuTrigger = false;
+                OpenNewMenu();
+            } else if (changed && r.key) {
                 configManager::putBoolean(config, "ESP", r.key, *r.value);
+            }
         }
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 12));
         if (ImGui::BeginPopup("Display options")) {
@@ -2215,6 +2225,7 @@ void RenderMenu() {
     ImGui::SetNextWindowSize(winSz, ImGuiCond_FirstUseEver);
     ImGui::GetStyle().WindowRounding = 3.5;
     CyberMenu::render();
+    RenderNewMenuOverlay();
 }
 
 extern "C" void OpenMeenu(void) {
