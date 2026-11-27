@@ -1,7 +1,6 @@
 // HMOOD__TG@i_8_f
 
-
-#import "Engine.h"
+#import "engine.h"
 #include "menu.h"
 #include "esp.h"
 #import "mahoa.h"
@@ -47,12 +46,237 @@
 
 #define E(str) _xor_(str).c_str()
 
-
 #define iPhone8P ([UIScreen instancesRespondToSelector:@selector(currentMode)] ? CGSizeEqualToSize(CGSizeMake(1242, 2208), [[UIScreen mainScreen] currentMode].size) : NO)
 
 #define HMOOD_METALBIEW_IMPLEMENTATION
 #include "ESP/Engine_2.h"
 #undef HMOOD_METALBIEW_IMPLEMENTATION
+
+bool hideNameKillMsg = false;
+float strokeIntensity = 1.0f;
+
+SDK::ASTExtraPlayerController* g_LocalController = nullptr;
+SDK::ASTExtraPlayerController* localPlayerController = nullptr;
+SDK::ASTExtraPlayerCharacter* localPlayer = nullptr;
+
+ImFont* mainFont = nullptr;
+float globalHpAlphaF = 1.00f;
+
+ImU32 COLOR_Distance = IM_COL32(255, 255, 255, 255);
+ImColor borderColor = ImColor(0, 255, 0, 255);
+ImColor bgColor = ImColor(0, 0, 0, 80);
+
+bool ifismembotenable = false;
+
+namespace Settings {
+    bool isVisibilityCheck = true;
+    bool ifismembotenable = false;
+    bool BypassMode = false;
+
+    namespace SettingsTab {
+        bool BypassMode = false;
+    }
+
+    namespace Aimbot {
+        bool Enable = false;
+        bool Tick = false;
+        int AimMethod = 0;
+        std::atomic<int> TriggerMode{3};
+        float FOV = 200.f;
+
+        bool MemoryAimbot = false;
+        bool SilentAim = false;
+
+        namespace SilentAimSettings {
+            bool Enable = true;
+            bool AimKnocked = false;
+            bool Highprecisiontracking = false;
+
+            int Aimpositon = 0;
+            bool Prediction = true;
+            bool EnableFov = true;
+            bool BypassFOVLimit = false;
+            bool AimingLine = false;
+            float MaxStepDeg = 2.0f;
+            inline int LegitTrackSwitchrate = 6;
+        }
+    }
+}
+
+float ESPMaxDistance = 300.f;
+float AlertRadius = 50.0f;
+float SilentAimMaxDistance = 355.f;
+int IsStyle = 1;
+
+namespace imgui {
+    bool ESP = false;
+    bool Boxes = false;
+    bool HideBot = false;
+    bool Health = false;
+    bool Line = false;
+    bool Name = false;
+    bool TeamID = false;
+    bool Distance = false;
+    bool EnemyCount = false;
+    bool Weapon = false;
+    bool Bone = false;
+    bool GameInfo = false;
+    bool Alert360 = false;
+    bool EnemyAiming = false;
+    bool Items = false;
+    bool Lootbox = false;
+    bool Vehicle = false;
+    bool Grenade = false;
+}
+
+namespace itemesp {
+    bool Enable = false;
+    bool Vehicles = true;
+    float MaxDistance = 200.0f;
+}
+
+bool IsEnglish = false;
+bool ShowFov = false;
+
+int 玩家 = 0, 人机 = 0;
+
+bool 坐标追 = false;
+bool 自动开火 = false;
+
+bool 下雨 = false;
+float 巨人 = 1.0f;
+bool 人物变大 = false;
+bool 重置游客 = false;
+
+int 打击圈 = 0;
+int CL = 1;
+
+bool 瞄准线 = false;
+bool AimBot = false;
+int AimF = 3;
+int value = 120;
+int Aim = 0;
+
+float 追踪概率 = 100.f;
+
+bool FixShoot = false;
+float Cross = 150.f;
+float g_disstance = 150.0f;
+
+bool IgnoreKnocked = false;
+bool VisCheck = false;
+bool IgnoreBot = false;
+
+float RadarX = 30.f;
+float RadarY = 10.f;
+bool 对局信息 = true;
+bool IsLogin = true;
+bool Enable = false;
+
+float crosshairSizeSlider = 0.0f;
+bool IsCrossHair = false;
+
+bool IsNocamerashake = false;
+bool IsFastshoot = false;
+bool IsFastSwitch = false;
+bool IsNorecoil2 = false;
+bool IsFastDrop = false;
+bool IsHitXPL = false;
+bool InstantHit = false;
+
+float carx = 0.f;
+float cary = 0.f;
+float carz = 0.f;
+bool CarFly = false;
+
+bool tudongnhay = false;
+bool chaynhanhv2 = false;
+float tocdoquay = 0.f;
+bool isSpinning = false;
+
+float DanceValue = 0.f;
+float DancerValue = 0.f;
+float rainbowSpeed = 0.02f;
+
+bool MaxStep = false;
+bool good = false;
+bool Blacksky = false;
+bool 枪械变大 = false;
+bool HitX = false;
+bool ReCo = false;
+
+float magicX = 23.f + 150.f;
+float magicY = 25.f + 150.f;
+float magicZ = 30.5f + 150.f;
+bool MagicSDK = false;
+bool Magic = false;
+
+bool textBorder = true;
+bool IsLaunch = false;
+bool ResetGuest = false;
+int SX = 0;
+
+float Gun_Size = 2.5f;
+
+bool 人物自杀 = false;
+bool 据点 = false;
+
+int currentLanguage = 0;
+
+bool WideView = false;
+bool MemoryFastScope = false;
+bool MemoryZoom = false;
+bool MemoryDamage = false;
+bool MemoryRainbow = false;
+bool MemoryCrossSpin = false;
+float MemoryZoomFov = 40.f;
+float MemoryRainbowSpeed = 1.6f;
+float MemoryCrossSpinSpeed = 180.f;
+int WideValue = 100;
+
+bool initialized = false;
+bool hideHacker = true;
+HeeeNoScreenShotView* hideesp = nullptr;
+kaddr module = Get_module_base();
+
+namespace YN {
+    int boxtype = 1;
+    int healthbartype = 0;
+    int Nationtype = 2;
+    int DirectionLineSize = 70;
+    int VehicleDirectionLineSize = 100;
+    int offscreen_range = 40;
+    int max_distance_offscreen = 400;
+    int playersdistancessize = 600;
+    bool esp_Outline = true;
+    int distance_Radar = 150;
+}
+
+long l2 = 0xFFFFF;
+int Radar = 0;
+bool 下雪特效 = false;
+sConfig Config{};
+UISlider* Auto1 = nil;
+
+int Interval = 1;
+int counter = 0;
+float AimSmooth = 5.0f;
+
+int boxtype = 1;
+int healthbartype = 0;
+int Nationtype = 2;
+int DirectionLineSize = 70;
+int VehicleDirectionLineSize = 100;
+int offscreen_range = 40;
+int max_distance_offscreen = 400;
+int playersdistancessize = 600;
+bool esp_Outline = true;
+int distance_Radar = 150;
+
+int screenWidth = 0;
+int screenHeight = 0;
+char extra[30] = {0};
+float density = -1.f;
 
 namespace {
 template <typename T>
@@ -80,15 +304,17 @@ static bool IsAimTriggerActive(const ASTExtraPlayerCharacter* player) {
 }
 
 @implementation metalbiew
-INI* config;
+INI* config = nullptr;
 
++ (void)showChange:(BOOL)open {
+    MenDeal = (open == YES);
+}
 
 // HMOOD__TG@i_8_f
 - (MTKView *)mtkView
 {
     return (MTKView *)self.view;
 }
-
 
 // HMOOD__TG@i_8_f
 - (void)loadView {
@@ -105,7 +331,6 @@ INI* config;
     self.mtkView.backgroundColor = [UIColor colorWithRed:0 green:0 blue:0 alpha:0];
     self.mtkView.clipsToBounds = YES;
 }
-
 
 // HMOOD__TG@i_8_f
 - (instancetype)initWithNibName:(nullable NSString *)nibNameOrNil bundle:(nullable NSBundle *)nibBundleOrNil
@@ -140,7 +365,6 @@ INI* config;
     return self;
 }
 
-
 static auto start = std::chrono::steady_clock::now();
 static auto noww = std::chrono::high_resolution_clock::now();
 
@@ -152,7 +376,6 @@ namespace Settings
 namespace Variables {
     int ActiveTab = 1;
 }
-
 
 // HMOOD__TG@i_8_f
 - (void)drawInMTKView:(MTKView*)view
@@ -311,12 +534,10 @@ namespace Variables {
     hideHacker = configManager::readBoolean(config, "SYSTEM", "HIDERECORD", false);
 }
 
-
 // HMOOD__TG@i_8_f
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size
 {
 }
-
 
 // HMOOD__TG@i_8_f
 - (void)updateIOWithTouchEvent:(UIEvent *)event
@@ -365,7 +586,6 @@ namespace Variables {
     [self updateIOWithTouchEvent:event];
 }
 
-
 typedef uintptr_t kaddr;
 using namespace std;
 using namespace SDK;
@@ -374,7 +594,6 @@ struct sRegion {
     uintptr_t start, end;
 };
 std::vector<sRegion> trapRegions;
-
 
 // HMOOD__TG@i_8_f
 bool isObjectInvalid(UObject *obj) {
@@ -444,7 +663,7 @@ int GWorldNum = 0;
 TUObjectArray gobjects;
 
 #define TSL_FONT_DEFAULT_SIZE 26
-static UFont *robotoFont = 0, *robotoTinyFont = 0,*tslFont = 0;
+static UFont *robotoFont = nullptr, *robotoTinyFont = nullptr, *tslFont = nullptr;
 
 // HMOOD__TG@i_8_f
 UWorld *GetFullWorld()
@@ -520,7 +739,6 @@ TNameEntryArray *GetGNames() {
     return ((TNameEntryArray *(*)())fnAddr)();
 }
 
-
 // HMOOD__TG@i_8_f
 std::vector<AActor *> getActorsSafe(UWorld* World)
 {
@@ -558,7 +776,6 @@ std::vector<AActor *> getActorsSafe(UWorld* World)
     return ValidActors;
 }
 
-
 // HMOOD__TG@i_8_f
 FVector GetBoneLocationByName(ASTExtraPlayerCharacter *Actor, const char *BoneName) {
     if (!IsValidObjPtr(Actor) || !BoneName || !IsValidObjPtr(Actor->Mesh)) return FVector{0, 0, 0};
@@ -580,7 +797,6 @@ bool WriteAddr(void *addr, void *buffer, size_t length) {
     return true;
 }
 
-
 class Rect2 {
 public:
     float x;
@@ -588,19 +804,10 @@ public:
     float width;
     float height;
 
-    Rect2() {
-        this->x = 0;
-        this->y = 0;
-        this->width = 0;
-        this->height = 0;
-    }
+    Rect2() : x(0), y(0), width(0), height(0) {}
 
-    Rect2(float x, float y, float width, float height) {
-        this->x = x;
-        this->y = y;
-        this->width = width;
-        this->height = height;
-    }
+    Rect2(float x, float y, float width, float height)
+        : x(x), y(y), width(width), height(height) {}
 
     bool operator==(const Rect2 &src) const {
         return (src.x == this->x && src.y == this->y && src.height == this->height &&
@@ -608,8 +815,7 @@ public:
     }
 
     bool operator!=(const Rect2 &src) const {
-        return (src.x != this->x && src.y != this->y && src.height != this->height &&
-                src.width != this->width);
+        return !(*this == src);
     }
 };
 
@@ -630,14 +836,9 @@ ASTExtraPlayerController *g_PlayerController = nullptr;
 #define COLOR_YELLOW FLinearColor(1.000f, 1.000f, 0.000f, 1.000f)
 #define 黑色 FLinearColor(0, 0, 0, 1.f)
 #define 白色 FLinearColor(1.f, 1.f, 1.f, 1.f)
-
-#define 灰色  FLinearColor(0, 1.f, 0, 1.f)
-
-
+#define 灰色 FLinearColor(0, 1.f, 0, 1.f)
 #define 红色 FLinearColor(1.f, 0, 0, 0.7f)
 #define 绿色 FLinearColor(0, 0.5f, 0, 1.f)
-
-
 #define 黄色 FLinearColor(1.00f, 1.00f, 0.0f, 1.0f)
 #define 青色 FLinearColor(0.0f, 1.00f, 1.00f, 1.0f)
 #define 橄榄绿 FLinearColor(0.5f, 0.5f, 0.0f, 1.0f)
@@ -649,14 +850,12 @@ ASTExtraPlayerController *g_PlayerController = nullptr;
 
 #define W2S(w, s) UGameplayStatics::ProjectWorldToScreen(g_PlayerController, w, false, s)
 
-
 // HMOOD__TG@i_8_f
 FVector2D WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float PosX, float PosY,
-                       FVector Size, bool & outbuff)
+                       FVector Size, bool &outbuff)
 {
     bool flag = false;
-    double num = (double)Yaw;
-    double num2 = num * 0.017453292519943295;
+    double num2 = (double)Yaw * 0.017453292519943295;
     float num3 = (float)std::cos(num2);
     float num4 = (float)std::sin(num2);
     float num5 = Origin.X - LocalOrigin.X;
@@ -667,35 +866,17 @@ FVector2D WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float Pos
     FVector2D vector2;
     vector2.X = vector.X + PosX + Size.X / 2.f;
     vector2.Y = -vector.Y + PosY + Size.Y / 2.f;
-    bool flag2 = vector2.X > PosX + Size.X;
-    if (flag2)
-    {
+    if (vector2.X > PosX + Size.X) {
         vector2.X = PosX + Size.X;
+    } else if (vector2.X < PosX) {
+        vector2.X = PosX;
     }
-    else
-    {
-        bool flag3 = vector2.X < PosX;
-        if (flag3)
-        {
-            vector2.X = PosX;
-        }
-    }
-    bool flag4 = vector2.Y > PosY + Size.Y;
-    if (flag4)
-    {
+    if (vector2.Y > PosY + Size.Y) {
         vector2.Y = PosY + Size.Y;
+    } else if (vector2.Y < PosY) {
+        vector2.Y = PosY;
     }
-    else
-    {
-        bool flag5 = vector2.Y < PosY;
-        if (flag5)
-        {
-            vector2.Y = PosY;
-        }
-    }
-    bool flag6 = vector2.Y == PosY || vector2.X == PosX;
-    if (flag6)
-    {
+    if (vector2.Y == PosY || vector2.X == PosX || vector2.Y == PosY + Size.Y || vector2.X == PosX + Size.X) {
         flag = true;
     }
     outbuff = flag;
@@ -703,18 +884,25 @@ FVector2D WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float Pos
 }
 
 // HMOOD__TG@i_8_f
+FVector WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float PosX, float PosY,
+                     Vector3 Size, bool &outbuff)
+{
+    FVector2D res = WorldToRadar(Yaw, Origin, LocalOrigin, PosX, PosY, FVector{Size.X, Size.Y, Size.Z}, outbuff);
+    return FVector{res.X, res.Y, 0.f};
+}
+
+// HMOOD__TG@i_8_f
 FVector2D rotateCoord(float angle, FVector2D coord) {
-    float s = sin(angle * M_PI / 180);
-    float c = cos(angle * M_PI / 180);
+    float s = sin(angle * M_PI / 180.f);
+    float c = cos(angle * M_PI / 180.f);
 
     return {coord.X * c + coord.Y * s, -coord.X * s + coord.Y * c};
 }
 
 // HMOOD__TG@i_8_f
 float DegreeToRadian(float degree){
-    return degree * (M_PI / 180);
+    return degree * (M_PI / 180.f);
 }
-
 
 // HMOOD__TG@i_8_f
 void DrawFilledRectangle(AHUD *HUD, FVector2D Pos, float Width, float Height, FLinearColor Color) {
@@ -722,56 +910,32 @@ void DrawFilledRectangle(AHUD *HUD, FVector2D Pos, float Width, float Height, FL
     HUD->DrawRect(Color, Pos.X, Pos.Y, Width, Height);
 }
 
-
 // HMOOD__TG@i_8_f
 void DrawLine(AHUD *HUD, FVector2D posFrom, FVector2D posTo, float Thickness, FLinearColor Color) {
     if (!IsValidObjPtr(HUD)) return;
     HUD->DrawLine(posFrom.X, posFrom.Y, posTo.X, posTo.Y, Color, Thickness);
 }
 
-
-// HMOOD__TG@i_8_f
-void DrawCircle(AHUD *HUD, int x, int y, int radius, int numsides, FLinearColor OutlineColor){
-    if (!IsValidObjPtr(HUD) || !IsValidObjPtr(HUD->Canvas) || numsides <= 0) return;
-    if (numsides > 127) numsides = 127;
-    float Step = M_PI * 2.0 / numsides;
-    int Count = 0;
-    FVector2D V[128];
-    for (float a = 0; a < M_PI * 2.0; a += Step)
-    {
-        float X1 = radius * cos(a) + x;
-        float Y1 = radius * sin(a) + y;
-        float X2 = radius * cos(a + Step) + x;
-        float Y2 = radius * sin(a + Step) + y;
-        V[Count].X = X1;
-        V[Count].Y = Y1;
-        V[Count + 1].X = X2;
-        V[Count + 1].Y = Y2;
-        HUD->Canvas->K2_DrawLine(FVector2D({ V[Count].X, V[Count].Y }), FVector2D({ X2, Y2 }), 1.f, OutlineColor);
-    }
-}
-
 // HMOOD__TG@i_8_f
 void DrawCircle(UCanvas *Canvas, int x, int y, int radius, int numsides, FLinearColor OutlineColor){
     if (!IsValidObjPtr(Canvas) || numsides <= 0) return;
     if (numsides > 127) numsides = 127;
-    float Step = M_PI * 2.0 / numsides;
-    int Count = 0;
-    FVector2D V[128];
-    for (float a = 0; a < M_PI * 2.0; a += Step)
+    float Step = (float)(M_PI * 2.0 / numsides);
+    for (float a = 0.f; a < (float)(M_PI * 2.0); a += Step)
     {
-        float X1 = radius * cos(a) + x;
-        float Y1 = radius * sin(a) + y;
-        float X2 = radius * cos(a + Step) + x;
-        float Y2 = radius * sin(a + Step) + y;
-        V[Count].X = X1;
-        V[Count].Y = Y1;
-        V[Count + 1].X = X2;
-        V[Count + 1].Y = Y2;
-        Canvas->K2_DrawLine(FVector2D({ V[Count].X, V[Count].Y }), FVector2D({ X2, Y2 }), 1.f, OutlineColor);
+        float X1 = radius * cosf(a) + x;
+        float Y1 = radius * sinf(a) + y;
+        float X2 = radius * cosf(a + Step) + x;
+        float Y2 = radius * sinf(a + Step) + y;
+        Canvas->K2_DrawLine(FVector2D{X1, Y1}, FVector2D{X2, Y2}, 1.f, OutlineColor);
     }
 }
 
+// HMOOD__TG@i_8_f
+void DrawCircle(AHUD *HUD, int x, int y, int radius, int numsides, FLinearColor OutlineColor){
+    if (!IsValidObjPtr(HUD) || !IsValidObjPtr(HUD->Canvas)) return;
+    DrawCircle(HUD->Canvas, x, y, radius, numsides, OutlineColor);
+}
 
 // HMOOD__TG@i_8_f
 void *LoadFont() {
@@ -783,7 +947,6 @@ void *LoadFont() {
     if (!robotoTinyFont) robotoTinyFont = UObject::FindObject<UFont>("Font RobotoTiny.RobotoTiny");
     return nullptr;
 }
-
 
 // HMOOD__TG@i_8_f
 bool _read(kaddr addr, void *buffer, int len)
@@ -798,49 +961,6 @@ bool _read(kaddr addr, void *buffer, int len)
     return true;
 }
 
-
-// HMOOD__TG@i_8_f
-FVector WorldToRadar(float Yaw, FVector Origin, FVector LocalOrigin, float PosX, float PosY, Vector3 Size, bool &outbuff) {
-    bool flag = false;
-    double num = (double)Yaw;
-    double num2 = num * 0.017453292519943295;
-    float num3 = (float)std::cos(num2);
-    float num4 = (float)std::sin(num2);
-    float num5 = Origin.X - LocalOrigin.X;
-    float num6 = Origin.Y - LocalOrigin.Y;
-    struct FVector Xector;
-    Xector.X = (num6 * num3 - num5 * num4) / 150.f;
-    Xector.Y = (num5 * num3 + num6 * num4) / 150.f;
-    struct FVector Xector2;
-    Xector2.X = Xector.X + PosX + Size.X / 2.f;
-    Xector2.Y = -Xector.Y + PosY + Size.Y / 2.f;
-    bool flag2 = Xector2.X > PosX + Size.X;
-    if (flag2) {
-        Xector2.X = PosX + Size.X;
-    } else {
-        bool flag3 = Xector2.X < PosX;
-        if (flag3) {
-            Xector2.X = PosX;
-        }
-    }
-    bool flag4 = Xector2.Y > PosY + Size.Y;
-    if (flag4) {
-        Xector2.Y = PosY + Size.Y;
-    } else {
-        bool flag5 = Xector2.Y < PosY;
-        if (flag5) {
-            Xector2.Y = PosY;
-        }
-    }
-    bool flag6 = Xector2.Y == PosY || Xector2.X == PosX;
-    if (flag6) {
-        flag = true;
-    }
-    outbuff = flag;
-    return Xector2;
-}
-
-
 void (*orig_Broadcast)(ASTExtraPlayerController* thiz, FFatalDamageParameter* FatalDamageParameter) = nullptr;
 
 // HMOOD__TG@i_8_f
@@ -850,10 +970,7 @@ void hk_Broadcast(ASTExtraPlayerController* thiz, FFatalDamageParameter* FatalDa
     if (!IsValidObjPtr(thiz) || !Tools::IsPtrValid(FatalDamageParameter))
         return orig_Broadcast(thiz, FatalDamageParameter);
 
-    if (!IsValidObjPtr(g_PlayerController))
-        return orig_Broadcast(thiz, FatalDamageParameter);
-
-    if (!IsValidObjPtr(g_LocalPlayer))
+    if (!IsValidObjPtr(g_PlayerController) || !IsValidObjPtr(g_LocalPlayer))
         return orig_Broadcast(thiz, FatalDamageParameter);
 
     if (g_PlayerController->PlayerKey == 0)
@@ -873,7 +990,6 @@ void hk_Broadcast(ASTExtraPlayerController* thiz, FFatalDamageParameter* FatalDa
 
     return orig_Broadcast(thiz, FatalDamageParameter);
 }
-
 
 int glWidth = 0, glHeight = 0;
 
@@ -966,7 +1082,6 @@ static void UpdateAutoFire(ASTExtraPlayerCharacter* player, ASTExtraPlayerContro
     }
 }
 
-
 bool  VehicleAimNearCrosshair = false;
 bool  VehicleVisCheck         = false;
 
@@ -982,13 +1097,12 @@ static inline float Len (const FVector& v){ return sqrtf(v.X*v.X + v.Y*v.Y + v.Z
 static inline float DegToRad(float d){ return d * 0.017453292519943295f; }
 
 // HMOOD__TG@i_8_f
-static float GetPingSeconds(APlayerController*  ) {
+static float GetPingSeconds(APlayerController* ) {
     float ms = SilentAimPingMs;
     if (ms < 0.f)   ms = 0.f;
     if (ms > 400.f) ms = 400.f;
     return ms * 0.001f;
 }
-
 
 // HMOOD__TG@i_8_f
 static bool IsPartiallyVisible(APlayerController* PC, AActor* Other, const FVector& viewLoc){
@@ -1006,7 +1120,6 @@ static bool IsPartiallyVisible(APlayerController* PC, AActor* Other, const FVect
     }
     return false;
 }
-
 
 // HMOOD__TG@i_8_f
 static bool IsVisiblePoint(APlayerController* PC, AActor* Target, const FVector& from, const FVector& to) {
@@ -1039,7 +1152,6 @@ static FVector GetBestBonePosVisible(ASTExtraPlayerCharacter* P, APlayerControll
     FVector h = P->GetBonePos("Head", {}); if (IsFiniteVec3(h) && (h.X||h.Y||h.Z)) return h;
     return P->GetBonePos("pelvis", {});
 }
-
 
 // HMOOD__TG@i_8_f
 static FVector ResolveAimPosition(ASTExtraPlayerCharacter* player, ASTExtraPlayerController* controller) {
@@ -1120,52 +1232,7 @@ static ASTExtraPlayerCharacter* FindVehicleOccupant(ASTExtraVehicleBase* Veh){
     return best;
 }
 
-// HMOOD__TG@i_8_f
-static ASTExtraPlayerCharacter* PickAirborneOrPeekNearCrosshair(
-    APlayerController* PC, const FVector& start, const FRotator& shotRot, float coneDeg)
-{
-    if (!IsValidObjPtr(PC) || !IsValidObjPtr(g_LocalPlayer)) return nullptr;
-
-    TArray<AActor*> allP;
-    UGameplayStatics::GetAllActorsOfClass((UObject*)PC, ASTExtraPlayerCharacter::StaticClass(), &allP);
-    if (allP.Num() <= 0 || allP.Num() > 100000) return nullptr;
-
-    FVector aimDir = UKismetMathLibrary::GetForwardVector(shotRot);
-    float l2 = aimDir.X*aimDir.X + aimDir.Y*aimDir.Y + aimDir.Z*aimDir.Z;
-    if (l2 < 0.5f && IsValidObjPtr(PC->PlayerCameraManager))
-        aimDir = UKismetMathLibrary::GetForwardVector(PC->PlayerCameraManager->GetCameraRotation());
-
-    const float coneCos = cosf(DegToRad(coneDeg>0.f?coneDeg:8.f));
-    FVector viewLoc = g_LocalPlayer->GetBonePos("Head", {}); viewLoc.Z += 10.f;
-
-    ASTExtraPlayerCharacter* best = nullptr;
-    float bestScore = 1e9f;
-
-    for (int i=0;i<allP.Num();++i){
-        auto* P = (ASTExtraPlayerCharacter*)allP[i];
-        if (!IsValidObjPtr(P) || P==g_LocalPlayer) continue;
-        if (P->bDead) continue;
-
-        FVector v = P->GetVelocity();
-        bool airborneish = (fabsf(v.Z) > 120.f);
-
-        if (!airborneish && !IsPartiallyVisible(PC, (AActor*)P, viewLoc)) continue;
-
-        FVector to = UKismetMathLibrary::Subtract_VectorVector(P->K2_GetActorLocation(), start);
-        float d = Len(to); if (d < 1.f) continue;
-
-        FVector dir = { to.X/d, to.Y/d, to.Z/d };
-        float dot = Dot3(aimDir, dir);
-        if (dot < coneCos) continue;
-
-        float score = (1.f - dot)*1000.f + (d * 0.001f);
-        if (score < bestScore){ bestScore = score; best = P; }
-    }
-    return best;
-}
-
-
-void (*orig_shoot_event)(USTExtraShootWeaponComponent *thiz, FVector start, FRotator rot, void *unk1, int unk2) = 0;
+void (*orig_shoot_event)(USTExtraShootWeaponComponent *thiz, FVector start, FRotator rot, void *unk1, int unk2) = nullptr;
 
 // HMOOD__TG@i_8_f
 void shoot_event(USTExtraShootWeaponComponent *thiz, FVector start, FRotator rot, ASTExtraShootWeapon *weapon, int unk1) {
@@ -1384,7 +1451,18 @@ void ResetGuestAccount() {
     }
 
     UIWindow *window = nil;
-
+    for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+        if ([scene isKindOfClass:[UIWindowScene class]] && scene.activationState == UISceneActivationStateForegroundActive) {
+            UIWindowScene *windowScene = (UIWindowScene *)scene;
+            for (UIWindow *w in windowScene.windows) {
+                if (w.isKeyWindow) {
+                    window = w;
+                    break;
+                }
+            }
+            if (window) break;
+        }
+    }
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     if (!window) window = [UIApplication sharedApplication].keyWindow;
@@ -1404,7 +1482,6 @@ void ResetGuestAccount() {
         exit(0);
     });
 }
-
 
 // HMOOD__TG@i_8_f
 static void ApplyMemoryReferenceOptions(ASTExtraPlayerCharacter* player, ASTExtraPlayerController* controller) {
@@ -1478,34 +1555,8 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
 
     ASTExtraPlayerCharacter *localPlayer = nullptr;
     ASTExtraPlayerController *localPlayerController = nullptr;
-    USTExtraGameInstance *playerChar = nullptr; (void)playerChar;
     screenWidth = ScreenWidth;
     screenHeight = ScreenHeight;
-
-    ASTExtraBaseCharacter *STExtraBaseCharacter = nullptr; (void)STExtraBaseCharacter;
-    ASTExtraCharacter *Charac = nullptr; (void)Charac;
-    FVerifySwitch *VerifySwitch = nullptr; (void)VerifySwitch;
-    FDistanceContinueHitCheck *DistanceContinueHitCheck = nullptr; (void)DistanceContinueHitCheck;
-    FAntiCheatDetailData *AntiCheatDetailData = nullptr; (void)AntiCheatDetailData;
-    UWeaponAntiCheatComp *WeaponAntiCheatComp = nullptr; (void)WeaponAntiCheatComp;
-    AGameNetworkManager *GameNetworkManager = nullptr; (void)GameNetworkManager;
-    UCheatManager *CheatManager = nullptr; (void)CheatManager;
-    UPlayerAntiCheatManager *PlayerAntiCheatManager = nullptr; (void)PlayerAntiCheatManager;
-    USTExtraFloatingVehicleMovementComponent *STExtraFloatingVehicleMovementComponent = nullptr; (void)STExtraFloatingVehicleMovementComponent;
-    USTExtraHelicopterVehicleMovementComponent *Helicopter = nullptr; (void)Helicopter;
-    ASTExtraShootWeapon *STExtraShootWeapon = nullptr; (void)STExtraShootWeapon;
-    USceneComponent *SceneComponent = nullptr; (void)SceneComponent;
-    UAntiCheatUtils *AntiCheatUtils = nullptr; (void)AntiCheatUtils;
-    UGMCheatManager *GMCheatManager = nullptr; (void)GMCheatManager;
-
-    UActorComponent *ActorComponent = nullptr; (void)ActorComponent;
-    FMoveCheatAntiStrategy *MoveCheatAntiStrategy = nullptr; (void)MoveCheatAntiStrategy;
-    UAssetUserData *AssetUserData = nullptr; (void)AssetUserData;
-    USTBuildSystemComponent *STBuildSystemComponent = nullptr; (void)STBuildSystemComponent;
-    UDefaultAntiCheatComponent *DefaultAntiCheatComponent = nullptr; (void)DefaultAntiCheatComponent;
-    FClientTimeSpeedCheck *ClientTimeSpeedCheck = nullptr; (void)ClientTimeSpeedCheck;
-    FRealtimeMoveSpeedCheck *RealtimeMoveSpeedCheck = nullptr; (void)RealtimeMoveSpeedCheck;
-    FShovelAntiCheat *ShovelAntiCheat = nullptr; (void)ShovelAntiCheat;
 
     glWidth = ScreenWidth;
     glHeight = ScreenHeight;
@@ -1522,8 +1573,6 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
             return;
 
         UKismetMathLibrary* UMC = (UKismetMathLibrary*)UKismetMathLibrary::StaticClass();
-        UGameplayStatics *gGameplayStatics = (UGameplayStatics *) UGameplayStatics::StaticClass();
-        (void)gGameplayStatics;
 
         auto GWorld = GetFullWorld();
 
@@ -1537,11 +1586,10 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
             }
 
             if (IsValidObjPtr(localPlayerController)) {
-                std::vector<ASTExtraPlayerCharacter *> PlayerCharacter;
-                GetAllActors(PlayerCharacter);
+                std::vector<ASTExtraPlayerCharacter *> PlayerCharacterList;
+                GetAllActors(PlayerCharacterList);
 
-                for (auto actor = PlayerCharacter.begin(); actor != PlayerCharacter.end(); ++actor) {
-                    auto Actor = *actor;
+                for (auto* Actor : PlayerCharacterList) {
                     if (!IsValidObjPtr(Actor)) continue;
                     if (Actor->PlayerKey == localPlayerController->PlayerKey) {
                         localPlayer = Actor;
@@ -1553,6 +1601,17 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
                     g_LocalPlayer = localPlayer;
                     g_PlayerController = localPlayerController;
                     g_LocalController = localPlayerController;
+
+                    if (hideNameKillMsg) {
+                        int its = 1002;
+                        auto VTable = (void**)localPlayerController->VTable;
+                        if (Tools::IsPtrValid(VTable) && Tools::IsPtrValid(&VTable[its]) && (VTable[its] != (void*)hk_Broadcast)) {
+                            if (!orig_Broadcast) {
+                                orig_Broadcast = decltype(orig_Broadcast)(VTable[its]);
+                            }
+                            WriteAddr(&VTable[its], (void *)&hk_Broadcast, sizeof(void*));
+                        }
+                    }
 
                     auto* camera = localPlayer->ThirdPersonCameraComponent;
                     static uintptr_t previousCamera = 0;
@@ -1585,16 +1644,11 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
                         } else {
                             if (!localPlayer->bIsWeaponFiring) {
                                 localPlayer->MeshContainer->RelativeRotation = { 0,360,0 };
-                            } else {
-                                if (isSpinning) {
-                                    if (localPlayer->bIsWeaponFiring) {
-                                        localPlayer->MeshContainer->RelativeRotation = { 0,DanceValue ,0 };
-                                        DanceValue += DancerValue;
-                                        if (DanceValue >= 360.0f)
-                                            DanceValue = 0.0f;
-                                        DanceValue += tocdoquay;
-                                    }
-                                }
+                            } else if (isSpinning) {
+                                localPlayer->MeshContainer->RelativeRotation = { 0,DanceValue ,0 };
+                                DanceValue += DancerValue + tocdoquay;
+                                if (DanceValue >= 360.0f)
+                                    DanceValue = fmodf(DanceValue, 360.0f);
                             }
                         }
                     }
@@ -1612,9 +1666,11 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
                     }
 
                     if (重置游客) {
+                        重置游客 = false;
                         ResetGuestAccount();
                     }
                     if (ResetGuest) {
+                        ResetGuest = false;
                         ResetGuestAccount();
                     }
 
@@ -1672,507 +1728,4 @@ void RenderESP(AHUD *HUD, int ScreenWidth, int ScreenHeight) {
                                                 Yaptr.Pitch -= CpYaT.Pitch;
                                                 Yaptr.Roll = 0.f;
 
-                                                const float maxStep = ImClamp(Settings::Aimbot::SilentAimSettings::MaxStepDeg, .3f, 8.f);
-                                                const float smooth = ImClamp(AimSmooth, 2.f, 30.f);
-                                                auto clampDelta = [](float v, float step) -> float {
-                                                    return v > step ? step : (v < -step ? -step : v);
-                                                };
-                                                localPlayer->AddControllerYawInput(clampDelta(Yaptr.Yaw / smooth, maxStep));
-                                                localPlayer->AddControllerPitchInput(clampDelta(Yaptr.Pitch / smooth, maxStep));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (IsLaunch)
-                    {
-                        if ((Enable && IsLogin) || (坐标追 && IsLogin)) {
-                            auto WeaponManagerComponent = localPlayer->WeaponManagerComponent;
-                            if (IsValidObjPtr(WeaponManagerComponent)) {
-                                auto propSlot = WeaponManagerComponent->GetCurrentUsingPropSlot();
-                                if ((int) propSlot.GetValue() >= 1 && (int) propSlot.GetValue() <= 3) {
-                                    auto CurrentWeaponReplicated = (ASTExtraShootWeapon *) WeaponManagerComponent->CurrentWeaponReplicated;
-                                    if (IsValidObjPtr(CurrentWeaponReplicated) && CurrentWeaponReplicated->IsA(ASTExtraShootWeapon::StaticClass())) {
-                                        auto ShootWeaponComponent = CurrentWeaponReplicated->ShootWeaponComponent;
-                                        if (IsValidObjPtr(ShootWeaponComponent)) {
-                                            int shoot_event_idx = 174;
-                                            auto VTable = (void **) ShootWeaponComponent->VTable;
-                                            if (!initialized) {
-                                                InitializeMemoryProtection();
-                                            }
-                                            if (Tools::IsPtrValid(VTable) && Tools::IsPtrValid(&VTable[shoot_event_idx]) && (VTable[shoot_event_idx] != (void*)shoot_event)) {
-                                                orig_shoot_event = decltype(orig_shoot_event)(VTable[shoot_event_idx]);
-                                                WriteAddr(&VTable[shoot_event_idx], (void *)&shoot_event, sizeof(void*));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        IsLaunch = false;
-                    }
-
-                    if (!localPlayer->IsUsingGrenade()) {
-                        auto WeaponManagerComponent = localPlayer->WeaponManagerComponent;
-                        if (IsValidObjPtr(WeaponManagerComponent)) {
-                            auto propSlot = WeaponManagerComponent->GetCurrentUsingPropSlot();
-                            if ((int) propSlot.GetValue() >= 1 && (int) propSlot.GetValue() <= 3) {
-                                auto CurrentWeaponReplicated = (ASTExtraShootWeapon *) WeaponManagerComponent->CurrentWeaponReplicated;
-                                if (IsValidObjPtr(CurrentWeaponReplicated) && CurrentWeaponReplicated->IsA(ASTExtraShootWeapon::StaticClass())) {
-                                    auto ShootWeaponEntityComp = CurrentWeaponReplicated->ShootWeaponEntityComp;
-                                    auto ShootWeaponEffectComp = CurrentWeaponReplicated->ShootWeaponEffectComp;
-
-                                    auto ID = CurrentWeaponReplicated->GetWeaponID();
-                                    if (ID != 108004 && ID != 108003 && ID != 108002 && ID != 108001 && ID != 108000 && ID != 108005 && ID != 108006 && ID != 108007) {
-                                        if (IsValidObjPtr(ShootWeaponEntityComp) && IsValidObjPtr(ShootWeaponEffectComp))
-                                        {
-                                            if (IsFastSwitch) {
-                                                ShootWeaponEntityComp->SwitchFromBackpackToIdleTime = 0.0f;
-                                                ShootWeaponEntityComp->SwitchFromIdleToBackpackTime = 0.0f;
-                                            }
-
-                                            if (IsCrossHair) {
-                                                memset(&ShootWeaponEntityComp->DeviationInfo, 0, sizeof(FSDeviation));
-                                                ShootWeaponEntityComp->ShotGunCenterPerc = 0.0f;
-                                                ShootWeaponEntityComp->ShotGunVerticalSpread = 0.0f;
-                                                ShootWeaponEntityComp->ShotGunHorizontalSpread = 0.0f;
-                                                ShootWeaponEntityComp->GameDeviationFactor = 0.0f;
-                                                ShootWeaponEntityComp->GameDeviationAccuracy = 0.0f;
-                                                ShootWeaponEntityComp->CrossHairInitialSize = 0.0f;
-                                                ShootWeaponEntityComp->CrossHairBurstSpeed = 0.0f;
-                                                ShootWeaponEntityComp->CrossHairBurstIncreaseSpeed = 0.0f;
-                                                ShootWeaponEntityComp->VehicleWeaponDeviationAngle = 0.0f;
-                                            }
-                                            if (IsFastshoot) {
-                                                ShootWeaponEntityComp->ShootInterval = 0.02f;
-                                            }
-                                            if (IsNocamerashake) {
-                                                ShootWeaponEffectComp->CameraShakeInnerRadius = 0.0f;
-                                                ShootWeaponEffectComp->CameraShakeOuterRadius = 0.0f;
-                                                ShootWeaponEffectComp->CameraShakFalloff = 0.0f;
-                                                ShootWeaponEntityComp->AnimationKick = 0;
-                                            }
-                                            if (IsNorecoil2) {
-                                                ShootWeaponEntityComp->RecoilKickADS = 0.0f;
-                                            }
-
-                                            if (HitX) {
-                                                ShootWeaponEntityComp->ExtraHitPerformScale = 100;
-                                                ShootWeaponEntityComp->HUDAlphaDecreaseSpeedScale = 1.f;
-                                            }
-                                            if (ReCo && IsLogin) {
-                                                ShootWeaponEntityComp->AccessoriesVRecoilFactor = 0.0f;
-                                                ShootWeaponEntityComp->AccessoriesHRecoilFactor = 0.0f;
-                                                ShootWeaponEntityComp->AccessoriesRecoveryFactor = 0.0f;
-                                            }
-
-                                            if (IsCrossHair) {
-                                                static float cnt = 0.0f;
-                                                float r = cos(cnt) * .5f + .5f;
-                                                float g = cos(cnt - 2.f * 3.14 / 3.f) * .5f + .5f;
-                                                float b = cos(cnt - 4.f * 3.14 / 3.f) * .5f + .5f;
-                                                (void)r; (void)g; (void)b;
-
-                                                if (cnt >= FLT_MAX) {
-                                                    cnt = 0.0f;
-                                                } else {
-                                                    cnt += 0.01f;
-                                                }
-
-                                                memset(&ShootWeaponEntityComp->DeviationInfo, 0, sizeof(FSDeviation));
-
-                                                ShootWeaponEntityComp->ShotGunCenterPerc = 0.0f;
-                                                ShootWeaponEntityComp->ShotGunVerticalSpread = 0.0f;
-                                                ShootWeaponEntityComp->ShotGunHorizontalSpread = 0.0f;
-                                                ShootWeaponEntityComp->GameDeviationFactor = 0.0f;
-                                                ShootWeaponEntityComp->GameDeviationAccuracy = 0.0f;
-
-                                                ShootWeaponEntityComp->CrossHairInitialSize = crosshairSizeSlider;
-                                                ShootWeaponEntityComp->CrossHairBurstSpeed = crosshairSizeSlider;
-                                                ShootWeaponEntityComp->CrossHairBurstIncreaseSpeed = crosshairSizeSlider;
-
-                                                ShootWeaponEntityComp->VehicleWeaponDeviationAngle = 0.0f;
-                                            }
-
-                                            if (IsHitXPL) {
-                                                ShootWeaponEntityComp->ExtraHitPerformScale = 300;
-                                                ShootWeaponEntityComp->HUDAlphaDecreaseSpeedScale = 5.1f;
-                                            }
-
-                                            if (CarFly && IsValidObjPtr(localPlayer->CurrentVehicle)) {
-                                                static float CurrentHeight = 0.0f;
-                                                auto CurrentVehicle = localPlayer->CurrentVehicle;
-                                                auto RootComponent = static_cast<UPrimitiveComponent*>(CurrentVehicle->K2_GetRootComponent());
-
-                                                if (IsValidObjPtr(RootComponent)) {
-                                                    if (CurrentVehicle->GetMoveForwardRate() > 0) {
-                                                        FVector Velocity{0, 0, 0};
-
-                                                        if (CurrentHeight < 70000.f) {
-                                                            Velocity.X = carx;
-                                                            Velocity.Y = cary;
-                                                            Velocity.Z = carz;
-
-                                                            CurrentHeight += Velocity.Z;
-
-                                                            RootComponent->SetAllPhysicsLinearVelocity(Velocity, true);
-                                                        } else {
-                                                            Velocity.Z = 0.f;
-                                                            RootComponent->SetAllPhysicsLinearVelocity(Velocity, true);
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            if (chaynhanhv2 && IsValidObjPtr(localPlayer->CharacterMovement)) {
-                                                localPlayer->CharacterMovement->GravityScale = -15.f;
-                                                localPlayer->CharacterMovement->JumpZVelocity = 10.f;
-                                                localPlayer->CharacterMovement->JumpOffJumpZFactor = 10.f;
-                                            }
-
-                                            if (tudongnhay) {
-                                                localPlayer->Jump();
-                                            }
-
-                                            if (IsFastDrop && IsValidObjPtr(localPlayer->ParachuteComponent)) {
-                                                localPlayer->ParachuteComponent->CurrentFallSpeed = 8300.f;
-                                                localPlayer->ParachuteComponent->FreeFall_AcceFall = 25000.f;
-                                                localPlayer->ParachuteComponent->FreeFall_MaxFreeFallSpeed = 25000.f;
-                                                localPlayer->ParachuteComponent->FreeFall_AcceForward = 25000.f;
-                                                localPlayer->ParachuteComponent->FreeFall_MaxForwardExtraFallSpeed = 25000.f;
-
-                                                localPlayer->ParachuteComponent->Opened_AcceFall = 5000.f;
-                                                localPlayer->ParachuteComponent->Opened_MaxFreeFallSpeed = 5000.f;
-                                                localPlayer->ParachuteComponent->Opened_AcceForward = 5000.f;
-                                                localPlayer->ParachuteComponent->Opened_MaxForwardSpeed = 5000.f;
-                                                localPlayer->ParachuteComponent->Opened_MaxForwardExtraFallSpeed = 5000.f;
-
-                                                localPlayer->ParachuteComponent->AllowMaxDiatanceSqAtServer = 40000.f;
-                                                localPlayer->ParachuteComponent->MaxZAllowDistance = 40000.f;
-                                            }
-
-                                            if (据点) {
-                                                static float cnt = 0.0f;
-                                                float r = cos(cnt) * .5f + .5f;
-                                                float g = cos(cnt - 2.f * 3.14 / 3.f) * .5f + .5f;
-                                                float b = cos(cnt - 4.f * 3.14 / 3.f) * .5f + .5f;
-                                                (void)r; (void)g; (void)b;
-                                                if (cnt >= FLT_MAX) {
-                                                    cnt = 0.0f;
-                                                } else {
-                                                    cnt += 0.01f;
-                                                }
-
-                                                memset(&ShootWeaponEntityComp->DeviationInfo, 0, sizeof(FSDeviation));
-                                                memset(&ShootWeaponEntityComp->RecoilInfo, 0, sizeof(FSRecoilInfo));
-
-                                                ShootWeaponEntityComp->ShotGunCenterPerc = 0.0f;
-                                                ShootWeaponEntityComp->ShotGunVerticalSpread = 0.0f;
-                                                ShootWeaponEntityComp->ShotGunHorizontalSpread = 0.0f;
-                                                ShootWeaponEntityComp->GameDeviationFactor = 0.0f;
-                                                ShootWeaponEntityComp->GameDeviationAccuracy = 0.0f;
-                                                ShootWeaponEntityComp->CrossHairInitialSize = 0.0f;
-                                                ShootWeaponEntityComp->CrossHairBurstSpeed = 0.0f;
-                                                ShootWeaponEntityComp->CrossHairBurstIncreaseSpeed = 0.0f;
-                                                ShootWeaponEntityComp->VehicleWeaponDeviationAngle = 0.0f;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (枪械变大) {
-                        auto WeaponManagerComponent = localPlayer->WeaponManagerComponent;
-                        if (IsValidObjPtr(WeaponManagerComponent)) {
-                            auto Slot = WeaponManagerComponent->GetCurrentUsingPropSlot();
-                            if ((int) Slot.GetValue() >= 1 && (int) Slot.GetValue() <= 3) {
-                                auto CurrentWeaponReplicated = (ASTExtraShootWeapon *) WeaponManagerComponent->CurrentWeaponReplicated;
-                                if (IsValidObjPtr(CurrentWeaponReplicated) && IsValidObjPtr(CurrentWeaponReplicated->RootComponent)) {
-                                    auto ShootWeaponEntityComp = CurrentWeaponReplicated->ShootWeaponEntityComp;
-                                    auto ShootWeaponEffectComp = CurrentWeaponReplicated->ShootWeaponEffectComp;
-                                    if (IsValidObjPtr(ShootWeaponEntityComp) && IsValidObjPtr(ShootWeaponEffectComp)) {
-                                        CurrentWeaponReplicated->RootComponent->RelativeScale3D.Y = Gun_Size;
-                                        CurrentWeaponReplicated->RootComponent->RelativeScale3D.Z = Gun_Size;
-                                        CurrentWeaponReplicated->RootComponent->RelativeScale3D.X = Gun_Size;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    int totalEnemies = 0, totalBots = 0;
-                    std::vector<ASTExtraPlayerCharacter *> PlayerCharacterList;
-                    GetAllActors(PlayerCharacterList);
-                    for (auto actor = PlayerCharacterList.begin(); actor != PlayerCharacterList.end(); ++actor) {
-                        auto Player = *actor;
-                        if (!IsValidObjPtr(Player)) continue;
-
-                        if (Player->PlayerKey == localPlayer->PlayerKey)
-                            continue;
-
-                        if (Player->TeamID == localPlayer->TeamID)
-                            continue;
-
-                        if (Player->bDead)
-                            continue;
-
-                        if (Player->bHidden)
-                            continue;
-
-                        if (!IsValidObjPtr(Player->RootComponent))
-                            continue;
-
-                        if (Config.ESPMenu.IgnoreBot && IsLogin) {
-                            if (Player->bEnsure)
-                                continue;
-                        }
-
-                        if (Player->bEnsure)
-                            totalBots++;
-                        else
-                            totalEnemies++;
-
-                        玩家 = totalEnemies;
-                        人机 = totalBots;
-
-                        if (hideNameKillMsg) {
-                            auto wep = localPlayerController;
-                            int its = 1002;
-                            auto VTable = (void**)wep->VTable;
-                            if (Tools::IsPtrValid(VTable) && Tools::IsPtrValid(&VTable[its]) && (VTable[its] != (void*)hk_Broadcast)) {
-                                orig_Broadcast = decltype(orig_Broadcast)(VTable[its]);
-                                WriteAddr(&VTable[its], (void *)&hk_Broadcast, sizeof(void*));
-                            }
-                        }
-
-                        FVector Head = GetBoneLocationByName(Player, "Head");
-                        Head.Z += 12.5f;
-                        FVector Root = GetBoneLocationByName(Player, "Root");
-                        (void)Root;
-
-                        float Distance = Player->GetDistanceTo(localPlayer) / 100.f;
-                        bool IsVisible = localPlayerController->LineOfSightTo(Player, {0,0,0}, true);
-
-                        if (IsVisible) {
-                            if (Player->bEnsure) {
-                                visCol.R = 0.f;
-                                visCol.G = 0.5f;
-                                visCol.B = 0.f;
-                                visCol.A = 1.f;
-                            } else if (Player->Health == 0.0f) {
-                                visCol.R = 0.0f;
-                                visCol.G = 0.3f;
-                                visCol.B = 0.0f;
-                                visCol.A = 1.0f;
-                            } else {
-                                visCol.R = 0.f;
-                                visCol.G = 0.5f;
-                                visCol.B = 0.f;
-                                visCol.A = 1.f;
-                            }
-                        } else if (Player->bEnsure) {
-                            visCol.R = 1.f;
-                            visCol.G = 0.f;
-                            visCol.B = 0.f;
-                            visCol.A = 1.f;
-                        } else if (Player->Health == 0.0f) {
-                            visCol.R = 0.549019607f;
-                            visCol.G = 0.039215686f;
-                            visCol.B = 0.050980392f;
-                            visCol.A = 1.0f;
-                        } else {
-                            visCol.R = 1.f;
-                            visCol.G = 0.f;
-                            visCol.B = 0.f;
-                            visCol.A = 1.f;
-                        }
-
-                        if (Player->IsInvincible)
-                        {
-                            visCol.R = 1.f;
-                            visCol.G = 1.f;
-                            visCol.B = 0.f;
-                            visCol.A = 1.f;
-                        }
-
-                        if (std::isfinite(Distance) && Distance < 500.f) {
-                            if (Radar == 1 && IsLogin && IsValidObjPtr(localPlayer->RootComponent) && IsValidObjPtr(localPlayerController->PlayerCameraManager)) {
-                                bool out = false;
-                                struct Vector3 Pos;
-                                Pos.X = (RadarX * 10);
-                                Pos.Y = (RadarY * 13);
-                                struct Vector3 Size;
-                                Size.X = 210;
-                                Size.Y = 200;
-                                float RadarCenterX = Pos.X + (Size.X / 2);
-                                float RadarCenterY = Pos.Y + (Size.Y / 2);
-
-                                FVector MyPosition{0,0,0}, EnemyPosition{0,0,0};
-                                ASTExtraVehicleBase * CurrentVehiclea = IsValidObjPtr(Player->CurrentVehicle) ? Player->CurrentVehicle : nullptr;
-                                if (CurrentVehiclea && IsValidObjPtr(CurrentVehiclea->RootComponent)) {
-                                    MyPosition = CurrentVehiclea->RootComponent->RelativeLocation;
-                                } else {
-                                    MyPosition = Player->RootComponent->RelativeLocation;
-                                }
-                                ASTExtraVehicleBase * CurrentVehicle = IsValidObjPtr(localPlayer->CurrentVehicle) ? localPlayer->CurrentVehicle : nullptr;
-                                if (CurrentVehicle && IsValidObjPtr(CurrentVehicle->RootComponent)) {
-                                    EnemyPosition = CurrentVehicle->RootComponent->RelativeLocation;
-                                } else {
-                                    EnemyPosition = localPlayer->RootComponent->RelativeLocation;
-                                }
-
-                                FVector RadarSketch = WorldToRadar(localPlayerController->PlayerCameraManager->CameraCache.POV.Rotation.Yaw, MyPosition, EnemyPosition, Pos.X, Pos.Y, Vector3(Size.X, Size.Y, 0), out);
-
-                                DrawCircle(HUD, RadarCenterX + 0.5f, RadarCenterY + 0.5f, 100.0f, 100.0f, COLOR_WHITE);
-
-                                DrawFilledRectangle(HUD, FVector2D{RadarCenterX + 0.5f, RadarCenterY + 0.5f}, 5, 5, COLOR_YELLOW);
-                                if (!localPlayerController->LineOfSightTo(localPlayerController->PlayerCameraManager, Head, true)) {
-                                    DrawFilledRectangle(HUD, FVector2D{RadarSketch.X, RadarSketch.Y}, 5, 5, COLOR_BLUE);
-                                } else {
-                                    DrawFilledRectangle(HUD, FVector2D{RadarSketch.X, RadarSketch.Y}, 5, 5, COLOR_RED);
-                                }
-                            }
-
-                            if (Radar == 2 && IsLogin && IsValidObjPtr(localPlayerController->PlayerCameraManager)) {
-                                float lateralAngleView = (localPlayerController->ControlRotation.Yaw) - 90;
-
-                                FVector selfcoord = localPlayerController->PlayerCameraManager->CameraCache.POV.Location;
-                                FVector Objectcoord = Player->RootComponent->RelativeLocation;
-
-                                int Ev = 200;
-
-                                FVector2D radar = rotateCoord(lateralAngleView, FVector2D((selfcoord.X - Objectcoord.X) / Ev, (selfcoord.Y - Objectcoord.Y) / Ev));
-
-                                FVector2D 雷达位置 = {500,200};
-                                float 雷达大小 = 55;
-                                Canvas->K2_DrawLine({(float)雷达位置.X - (225 * 雷达大小 / 100),(float)雷达位置.Y},{(float)雷达位置.X + (225 * 雷达大小 / 100) ,(float)雷达位置.Y}, 1, FLinearColor(1.f,1.f,1.f,1.f));
-
-                                Canvas->K2_DrawLine({(float)雷达位置.X,(float)雷达位置.Y - (225 * 雷达大小 / 100)},{(float)雷达位置.X ,(float)雷达位置.Y + (225 * 雷达大小 / 100)}, 1, FLinearColor(1.f,1.f,1.f,1.f));
-
-                                Canvas->K2_DrawLine({(float)雷达位置.X  - (225 * 雷达大小 / 100),(float)雷达位置.Y - (225 * 雷达大小 / 100)},{(float)雷达位置.X  - (225 * 雷达大小 / 100) ,(float)雷达位置.Y + (225 * 雷达大小 / 100)}, 1, FLinearColor(1.f,1.f,1.f,1.f));
-
-                                Canvas->K2_DrawLine({(float)雷达位置.X  + (225 * 雷达大小 / 100),(float)雷达位置.Y - (225 * 雷达大小 / 100)},{(float)雷达位置.X  + (225 * 雷达大小 / 100) ,(float)雷达位置.Y + (225 * 雷达大小 / 100)}, 1, FLinearColor(1.f,1.f,1.f,1.f));
-
-                                Canvas->K2_DrawLine({(float)雷达位置.X - (225 * 雷达大小 / 100),(float)雷达位置.Y  - (225 * 雷达大小 / 100)},{(float)雷达位置.X + (225 * 雷达大小 / 100) ,(float)雷达位置.Y  - (225 * 雷达大小 / 100)}, 1, FLinearColor(1.f,1.f,1.f,1.f));
-
-                                Canvas->K2_DrawLine({(float)雷达位置.X - (225 * 雷达大小 / 100),(float)雷达位置.Y  + (225 * 雷达大小 / 100)},{(float)雷达位置.X + (225 * 雷达大小 / 100) ,(float)雷达位置.Y  + (225 * 雷达大小 / 100)}, 1, FLinearColor(1.f,1.f,1.f,1.f));
-
-                                DrawCircle(Canvas, (float)雷达位置.X + radar.X * (雷达大小 / 100),(float)雷达位置.Y + radar.Y  * (雷达大小 / 100),2,50, FLinearColor(1.0f,0.0f,0.0f,1.0f));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    g_LocalPlayer = localPlayer;
-    g_PlayerController = localPlayerController;
-    g_LocalController = localPlayerController;
-    ApplyMemoryReferenceOptions(localPlayer, localPlayerController);
-    UpdateAutoFire(localPlayer, localPlayerController);
-    CaptureWorldEsp(localPlayer, localPlayerController);
-}
-
-
-void *(*oProcessEvent)(UObject *pObj, UFunction *pFunc, void *pArgs) = nullptr;
-
-// HMOOD__TG@i_8_f
-void *hkProcessEvent(UObject *pObj, UFunction *pFunc, void *pArgs) {
-    if (IsValidObjPtr(pFunc)) {
-        if (pFunc->GetFullName() == ("Function Engine.HUD.ReceiveDrawHUD")) {
-            AHUD *pHUD = (AHUD *) pObj;
-            if (IsValidObjPtr(pHUD) && Tools::IsPtrValid(pArgs)) {
-                auto Params = (AHUD_ReceiveDrawHUD_Params *) pArgs;
-                RenderESP(pHUD, Params->SizeX, Params->SizeY);
-                screenWidth = Params->SizeX;
-                screenHeight = Params->SizeY;
-            }
-        }
-    }
-    if (oProcessEvent) {
-        return oProcessEvent(pObj, pFunc, pArgs);
-    }
-    return nullptr;
-}
-
-
-// HMOOD__TG@i_8_f
-void *RTL_language() {
-    long mainAddr = obbbbl();
-    if (!mainAddr || !Tools::IsPtrValid(reinterpret_cast<void*>(mainAddr))) {
-        return nullptr;
-    }
-    auto MAIN = (FUObjectArray *)mainAddr;
-    if (!UObject::GUObjectArray) {
-        UObject::GUObjectArray = MAIN;
-    }
-    auto gobjectsLocal = MAIN->ObjObjects;
-    int count = gobjectsLocal.Num();
-    if (count <= 0 || count > 2000000) return nullptr;
-
-    for (int i = 0; i < count; i++) {
-        auto obj = gobjectsLocal.GetByIndex(i);
-        if (isObjectInvalid(obj)) continue;
-
-        if (obj->IsA(AHUD::StaticClass())) {
-            auto HUD = (AHUD *) obj;
-            int its = 76;
-            auto VTable = (void**)HUD->VTable;
-            if (Tools::IsPtrValid(VTable) && Tools::IsPtrValid(&VTable[its]) && (VTable[its] != (void*)hkProcessEvent)) {
-                oProcessEvent = decltype(oProcessEvent)(VTable[its]);
-                WriteAddr(&VTable[its], (void *)&hkProcessEvent, sizeof(void*));
-            }
-        }
-        if (obj->IsA(ASTExtraPlayerController::StaticClass())) {
-            auto PC = (ASTExtraPlayerController *) obj;
-            int its = 76;
-            auto VTable = (void**)PC->VTable;
-            if (Tools::IsPtrValid(VTable) && Tools::IsPtrValid(&VTable[its]) && (VTable[its] != (void*)hkProcessEvent)) {
-                oProcessEvent = decltype(oProcessEvent)(VTable[its]);
-                WriteAddr(&VTable[its], (void *)&hkProcessEvent, sizeof(void*));
-            }
-        }
-    }
-    return nullptr;
-}
-
-
-// HMOOD__TG@i_8_f
-+ (void)load
-{
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self load1];
-    });
-}
-
-// HMOOD__TG@i_8_f
-+ (void)load1
-{
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        while (!FName::GNames) {
-            FName::GNames = GetGNames();
-            usleep(500000);
-        }
-
-        while (!UObject::GUObjectArray) {
-            long addr = obbbbl();
-            if (addr && Tools::IsPtrValid(reinterpret_cast<void*>(addr))) {
-                UObject::GUObjectArray = (FUObjectArray *)addr;
-            }
-            usleep(500000);
-        }
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            RTL_language();
-        });
-    });
-}
-
-
-@end
+                                                
