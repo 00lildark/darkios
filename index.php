@@ -1,108 +1,231 @@
 <?php
 $dataDir = __DIR__ . '/data';
+$backupDir = $dataDir . '/backups';
 $dataFile = $dataDir . '/store.json';
+$lockFile = $dataDir . '/store.lock';
 
 if (!is_dir($dataDir)) {
     @mkdir($dataDir, 0775, true);
+}
+if (!is_dir($backupDir)) {
+    @mkdir($backupDir, 0775, true);
+}
+
+// Birbaşa JSON faylına kənardan girişi bağla
+$htaccess = $dataDir . '/.htaccess';
+if (!file_exists($htaccess)) {
+    @file_put_contents($htaccess, "Deny from all\n");
 }
 
 $defaultStore = [
     'records' => [],
     'banned' => [],
     'devices' => [],
+    'deletedIds' => [],
     'updateModeOn' => false,
     'updatedAt' => 0
 ];
 
-function darkiosReadStore(string $file, array $fallback): array {
-    if (!file_exists($file)) {
-        $alt = __DIR__ . '/api/keys.json';
-        if (file_exists($alt)) {
-            $rawAlt = @file_get_contents($alt);
-            $decAlt = json_decode((string)$rawAlt, true);
-            if (is_array($decAlt)) {
-                return array_merge($fallback, $decAlt);
-            }
+function darkiosReadStore(string $file, string $backupDir, array $fallback): array {
+    $tryFiles = [$file];
+    if (is_dir($backupDir)) {
+        $baks = glob($backupDir . '/store_*.json');
+        if ($baks) {
+            rsort($baks);
+            $tryFiles = array_merge($tryFiles, array_slice($baks, 0, 5));
         }
-        return $fallback;
     }
-    $fp = @fopen($file, 'rb');
-    if (!$fp) {
-        return $fallback;
+    $alt = __DIR__ . '/api/keys.json';
+    if (file_exists($alt)) {
+        $tryFiles[] = $alt;
     }
-    @flock($fp, LOCK_SH);
-    $raw = stream_get_contents($fp);
-    @flock($fp, LOCK_UN);
-    @fclose($fp);
 
-    $decoded = json_decode((string)$raw, true);
-    if (!is_array($decoded)) {
-        return $fallback;
+    foreach ($tryFiles as $candidate) {
+        if (!file_exists($candidate)) continue;
+        $raw = @file_get_contents($candidate);
+        if ($raw === false || trim($raw) === '') continue;
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded) && (isset($decoded['records']) || isset($decoded['banned']))) {
+            return array_merge($fallback, $decoded);
+        }
     }
-    return array_merge($fallback, $decoded);
+    return $fallback;
 }
 
-function darkiosWriteStore(string $file, array $store): bool {
-    $tmp = $file . '.tmp.' . getmypid();
+function darkiosWriteStore(string $file, string $backupDir, array $store): bool {
     $json = json_encode($store, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     if ($json === false) {
         return false;
     }
+    $tmp = $file . '.tmp.' . getmypid() . '.' . mt_rand(1000, 9999);
     if (@file_put_contents($tmp, $json, LOCK_EX) === false) {
         return false;
     }
-    return @rename($tmp, $file);
+    if (!@rename($tmp, $file)) {
+        @unlink($tmp);
+        return false;
+    }
+
+    // Hər dəyişiklikdə təhlükəsiz ehtiyat nüsxə saxla (son 30 nüsxə)
+    if (is_dir($backupDir) && count($store['records']) > 0) {
+        $bakFile = $backupDir . '/store_' . date('Ymd_His') . '_' . mt_rand(100, 999) . '.json';
+        @file_put_contents($bakFile, $json, LOCK_EX);
+        $baks = glob($backupDir . '/store_*.json');
+        if ($baks && count($baks) > 30) {
+            sort($baks);
+            foreach (array_slice($baks, 0, count($baks) - 30) as $old) {
+                @unlink($old);
+            }
+        }
+    }
+    return true;
+}
+
+function darkiosMergeByKeyOrId(array $current, array $incoming, array $deletedIds, string $uniqueField = 'key'): array {
+    $deletedMap = array_flip($deletedIds);
+    $map = [];
+
+    foreach ($current as $item) {
+        if (!is_array($item)) continue;
+        $id = $item['id'] ?? '';
+        $uk = $item[$uniqueField] ?? $id;
+        if ($id !== '' && isset($deletedMap[$id])) continue;
+        if ($uk !== '') {
+            $map[$uk] = $item;
+        }
+    }
+
+    foreach ($incoming as $item) {
+        if (!is_array($item)) continue;
+        $id = $item['id'] ?? '';
+        $uk = $item[$uniqueField] ?? $id;
+        if ($id !== '' && isset($deletedMap[$id])) continue;
+        if ($uk === '') continue;
+
+        if (isset($map[$uk])) {
+            $existing = $map[$uk];
+            $existingMod = (int)($existing['modifiedAt'] ?? 0);
+            $incomingMod = (int)($item['modifiedAt'] ?? 0);
+            if ($incomingMod >= $existingMod) {
+                // startedAt heç vaxt itməsin
+                if (empty($item['startedAt']) && !empty($existing['startedAt'])) {
+                    $item['startedAt'] = $existing['startedAt'];
+                }
+                $map[$uk] = array_merge($existing, $item);
+            }
+        } else {
+            $map[$uk] = $item;
+        }
+    }
+
+    $result = array_values($map);
+    usort($result, function ($a, $b) {
+        return strcmp((string)($b['created'] ?? ''), (string)($a['created'] ?? ''));
+    });
+    return $result;
 }
 
 if (isset($_GET['sync'])) {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+    header('Pragma: no-cache');
+
+    $lockFp = @fopen($lockFile, 'c+');
+    if ($lockFp) {
+        @flock($lockFp, LOCK_EX);
+    }
+
+    $current = darkiosReadStore($dataFile, $backupDir, $defaultStore);
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $payload = json_decode((string)file_get_contents('php://input'), true);
         if (!is_array($payload)) {
+            if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
             http_response_code(400);
             echo json_encode(['status' => 'error', 'message' => 'Invalid JSON'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        $current = darkiosReadStore($dataFile, $defaultStore);
+        $action = $payload['action'] ?? 'merge';
+        $deletedIds = is_array($current['deletedIds'] ?? null) ? $current['deletedIds'] : [];
 
-        $incomingRecords = isset($payload['records']) && is_array($payload['records']) ? $payload['records'] : null;
-        $incomingBanned = isset($payload['banned']) && is_array($payload['banned']) ? $payload['banned'] : null;
-        $incomingDevices = isset($payload['devices']) && is_array($payload['devices']) ? $payload['devices'] : null;
-        $allowEmptyOverwrite = !empty($payload['forceClear']);
+        if ($action === 'delete_key' && !empty($payload['id'])) {
+            $delId = (string)$payload['id'];
+            if (!in_array($delId, $deletedIds, true)) {
+                $deletedIds[] = $delId;
+            }
+            $current['records'] = array_values(array_filter($current['records'], fn($r) => ($r['id'] ?? '') !== $delId));
+            $current['devices'] = array_values(array_filter($current['devices'], fn($d) => ($d['keyId'] ?? '') !== $delId));
+        } elseif ($action === 'ban_key') {
+            $banObj = is_array($payload['banEntry'] ?? null) ? $payload['banEntry'] : null;
+            $delId = (string)($payload['id'] ?? '');
+            $banKeyVal = (string)($banObj['key'] ?? ($payload['key'] ?? ''));
+            if ($delId !== '' && !in_array($delId, $deletedIds, true)) {
+                $deletedIds[] = $delId;
+            }
+            if ($banKeyVal !== '') {
+                $current['records'] = array_values(array_filter($current['records'], fn($r) => ($r['key'] ?? '') !== $banKeyVal && ($r['id'] ?? '') !== $delId));
+                if ($banObj) {
+                    array_unshift($current['banned'], $banObj);
+                }
+            }
+        } elseif ($action === 'unban_key' && !empty($payload['id'])) {
+            $unbanId = (string)$payload['id'];
+            if (!in_array($unbanId, $deletedIds, true)) {
+                $deletedIds[] = $unbanId;
+            }
+            $current['banned'] = array_values(array_filter($current['banned'], fn($b) => ($b['id'] ?? '') !== $unbanId));
+        } elseif ($action === 'clear_all_manual' && !empty($payload['confirmClearAll'])) {
+            foreach ($current['records'] as $r) {
+                if (!empty($r['id'])) $deletedIds[] = (string)$r['id'];
+            }
+            $current['records'] = [];
+            $current['devices'] = [];
+            $current['updateModeOn'] = false;
+        }
 
-        if (!$allowEmptyOverwrite && $incomingRecords !== null && count($incomingRecords) === 0 && count($current['records']) > 0) {
-            $incomingRecords = $current['records'];
-        }
-        if (!$allowEmptyOverwrite && $incomingBanned !== null && count($incomingBanned) === 0 && count($current['banned']) > 0) {
-            $incomingBanned = $current['banned'];
-        }
+        $deletedIds = array_values(array_unique(array_slice($deletedIds, -5000)));
+
+        $incomingRecords = is_array($payload['records'] ?? null) ? $payload['records'] : [];
+        $incomingBanned = is_array($payload['banned'] ?? null) ? $payload['banned'] : [];
+        $incomingDevices = is_array($payload['devices'] ?? null) ? $payload['devices'] : [];
+
+        $mergedRecords = ($action === 'clear_all_manual')
+            ? []
+            : darkiosMergeByKeyOrId($current['records'], $incomingRecords, $deletedIds, 'key');
+
+        $mergedBanned = darkiosMergeByKeyOrId($current['banned'], $incomingBanned, $deletedIds, 'key');
+        $mergedDevices = ($action === 'clear_all_manual')
+            ? []
+            : darkiosMergeByKeyOrId($current['devices'], $incomingDevices, $deletedIds, 'id');
 
         $nextStore = [
-            'records' => $incomingRecords !== null ? $incomingRecords : $current['records'],
-            'banned' => $incomingBanned !== null ? $incomingBanned : $current['banned'],
-            'devices' => $incomingDevices !== null ? $incomingDevices : $current['devices'],
+            'records' => $mergedRecords,
+            'banned' => $mergedBanned,
+            'devices' => $mergedDevices,
+            'deletedIds' => $deletedIds,
             'updateModeOn' => isset($payload['updateModeOn']) ? (bool)$payload['updateModeOn'] : (bool)$current['updateModeOn'],
             'updatedAt' => (int)round(microtime(true) * 1000)
         ];
 
-        if (!darkiosWriteStore($dataFile, $nextStore)) {
+        if (!darkiosWriteStore($dataFile, $backupDir, $nextStore)) {
+            if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
             http_response_code(500);
             echo json_encode(['status' => 'error', 'message' => 'Write failed'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
+        if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
         echo json_encode(['status' => 'ok', 'data' => $nextStore], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    echo json_encode(['status' => 'ok', 'data' => darkiosReadStore($dataFile, $defaultStore)], JSON_UNESCAPED_UNICODE);
+    if ($lockFp) { @flock($lockFp, LOCK_UN); @fclose($lockFp); }
+    echo json_encode(['status' => 'ok', 'data' => $current], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-$initialStore = darkiosReadStore($dataFile, $defaultStore);
+$initialStore = darkiosReadStore($dataFile, $backupDir, $defaultStore);
 ?>
 <!doctype html>
 <html lang="en">
@@ -139,8 +262,6 @@ body{
   -webkit-font-smoothing:antialiased;
 }
 .shell{display:flex;min-height:100vh}
-
-/* Minimal 4-item Rail */
 .rail{
   width:54px;
   flex:0 0 54px;
@@ -193,10 +314,7 @@ body{
   color:var(--red);
   border-color:var(--red-border);
 }
-
 .main{margin-left:54px;min-width:0;width:calc(100% - 54px)}
-
-/* Topbar */
 .topbar{
   height:52px;
   background:rgba(11,11,14,.92);
@@ -226,12 +344,10 @@ body{
   transition:.18s;
 }
 .top-btn:hover,.top-select:hover{border-color:#3a3a48;background:var(--panel2)}
-
 .content{padding:22px 18px 36px;max-width:1520px;margin:auto}
 .heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 18px;flex-wrap:wrap}
 .heading h1{font-size:21px;margin:0 0 4px;font-weight:800;letter-spacing:-.2px}
 .heading p{margin:0;color:var(--muted);font-size:12px;font-weight:600}
-
 .create{
   background:var(--red);
   color:#fff;
@@ -245,8 +361,6 @@ body{
   transition:.18s;
 }
 .create:hover{background:var(--red-hover)}
-
-/* Cards */
 .cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
 .metric{
   border:1px solid var(--line);
@@ -258,8 +372,6 @@ body{
 .metric .label{font-size:10px;letter-spacing:.6px;color:var(--muted);text-transform:uppercase;font-weight:800}
 .metric strong{display:block;font-size:22px;margin-top:6px;font-weight:800;color:var(--text)}
 .metric.accent strong{color:var(--red)}
-
-/* Table */
 .table-panel{border:1px solid var(--line);background:var(--panel);border-radius:10px;overflow:hidden}
 .table-head{
   padding:12px 14px;
@@ -388,8 +500,6 @@ body{
 }
 .blank{padding:42px 16px;text-align:center;color:var(--muted);font-size:12px;font-weight:700}
 .view{display:none}.view.active{display:block}
-
-/* Modals & Clean Action Sheet */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.84);z-index:20;display:none;align-items:center;justify-content:center;padding:16px}
 .modal-bg.open{display:flex}
 .modal{width:min(460px,100%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;max-height:90vh;overflow-y:auto}
@@ -410,7 +520,6 @@ body{
   font-size:12px;
   font-weight:700;
 }
-
 .clean-meta{
   background:var(--bg);
   border:1px solid var(--line);
@@ -459,7 +568,6 @@ body{
   transition:.15s;
 }
 .info-btn:hover{border-color:var(--red-border);color:var(--red)}
-
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}
 .secondary{
   background:var(--panel2);
@@ -488,8 +596,6 @@ body{
 .setting-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px}
 .setting-card h3{margin:0 0 6px;font-size:14px;font-weight:800}
 .setting-card p{color:var(--muted);font-size:11px;margin:0 0 12px;font-weight:600;line-height:1.5}
-
-/* Switch toggle for UPDATE!!! */
 .switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}
 .switch{position:relative;display:inline-block;width:48px;height:26px}
 .switch input{opacity:0;width:0;height:0}
@@ -509,8 +615,6 @@ input:checked + .slider:before{transform:translateX(22px)}
   border:1px solid var(--red-border);
   color:var(--red);
 }
-
-/* Login */
 .login-screen{min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg)}
 .login-card{width:min(380px,100%);padding:30px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
 .login-logo{
@@ -526,7 +630,6 @@ input:checked + .slider:before{transform:translateX(22px)}
 .login-card .field input{height:42px}
 .login-submit{width:100%;height:42px;margin-top:10px}
 .login-error{color:var(--red);font-size:11px;min-height:15px;margin-top:6px;font-weight:700}
-
 @media(max-width:720px){
   .cards{grid-template-columns:repeat(2,minmax(0,1fr))}
   .settings-grid{grid-template-columns:1fr}
@@ -585,7 +688,6 @@ input:checked + .slider:before{transform:translateX(22px)}
     </header>
 
     <main class="content">
-      <!-- 1. API KEYS -->
       <section class="view active" id="view-api">
         <div class="heading">
           <div>
@@ -641,7 +743,6 @@ input:checked + .slider:before{transform:translateX(22px)}
         </div>
       </section>
 
-      <!-- 2. KEY GENERATOR -->
       <section class="view" id="view-generator">
         <div class="heading">
           <div>
@@ -666,7 +767,6 @@ input:checked + .slider:before{transform:translateX(22px)}
         </div>
       </section>
 
-      <!-- 3. BANNED KEYS -->
       <section class="view" id="view-banned">
         <div class="heading">
           <div>
@@ -685,7 +785,6 @@ input:checked + .slider:before{transform:translateX(22px)}
         </div>
       </section>
 
-      <!-- 4. SETTINGS -->
       <section class="view" id="view-settings">
         <div class="heading">
           <div>
@@ -751,7 +850,26 @@ let deviceSessions=Array.isArray(SERVER_INITIAL.devices)?SERVER_INITIAL.devices:
 let updateModeOn=typeof SERVER_INITIAL.updateModeOn==='boolean'?SERVER_INITIAL.updateModeOn:false;
 let currentLang=localStorage.getItem('darkios_lang_v4')||'en';
 let isSyncingFromServer=false;
-let hasLoadedServerOnce=true;
+
+// Əgər server boş gələrsə amma bu cihazın localStorage-ında əvvəlki keylər qalıbsa, onları da serverə bərpa et
+(function hydrateFromLocalIfNeeded(){
+  try{
+    const localRecs=JSON.parse(localStorage.getItem('darkios_keys_v4')||'[]');
+    if(Array.isArray(localRecs)&&localRecs.length>0){
+      const existingKeys=new Set(records.map(r=>r.key));
+      let added=0;
+      localRecs.forEach(lr=>{
+        if(lr&&lr.key&&!existingKeys.has(lr.key)){
+          records.push(lr);
+          added++;
+        }
+      });
+      if(added>0){
+        setTimeout(()=>pushToServer('merge'),300);
+      }
+    }
+  }catch{}
+})();
 
 const i18n={
   en:{
@@ -824,18 +942,19 @@ function saveLocalCache(){
   }catch{}
 }
 
-async function pushToServer(forceClear=false){
-  if(isSyncingFromServer||!hasLoadedServerOnce)return;
+async function pushToServer(action='merge',extra={}){
+  if(isSyncingFromServer)return;
   try{
     const res=await fetch('?sync=1',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
+        action,
         records,
         banned,
         devices:deviceSessions,
         updateModeOn:!!updateModeOn,
-        forceClear:!!forceClear
+        ...extra
       })
     });
     if(res.ok){
@@ -856,9 +975,9 @@ async function pushToServer(forceClear=false){
   }
 }
 
-function persist(forceClear=false){
+function persist(action='merge',extra={}){
   saveLocalCache();
-  pushToServer(forceClear);
+  pushToServer(action,extra);
 }
 
 async function pullFromServer(showToast=false){
@@ -872,7 +991,6 @@ async function pullFromServer(showToast=false){
       if(Array.isArray(json.data.banned))banned=json.data.banned;
       if(Array.isArray(json.data.devices))deviceSessions=json.data.devices;
       if(typeof json.data.updateModeOn==='boolean')updateModeOn=json.data.updateModeOn;
-      hasLoadedServerOnce=true;
       saveLocalCache();
       renderAll();
       isSyncingFromServer=false;
@@ -986,16 +1104,18 @@ function checkStates(){
       r.pauseType=null;
       r.pauseUntil=null;
       r.status='Active';
+      r.modifiedAt=now;
       changed=true;
     }
     if(r.startedAt && r.durationMs && r.status==='Active'){
       if((r.startedAt+r.durationMs)<=now){
         r.status='Expired';
+        r.modifiedAt=now;
         changed=true;
       }
     }
   });
-  if(changed)persist();
+  if(changed)persist('merge');
 }
 
 function timeLeftText(r){
@@ -1059,6 +1179,7 @@ function renderUpdateUI(){
 }
 
 function toggleUpdateMode(checked){
+  const now=Date.now();
   if(checked){
     updateModeOn=true;
     let pausedCount=0;
@@ -1067,10 +1188,11 @@ function toggleUpdateMode(checked){
         r.status='Paused';
         r.pauseType='update';
         r.pauseUntil=null;
+        r.modifiedAt=now;
         pausedCount++;
       }
     });
-    persist();renderAll();
+    persist('merge');renderAll();
     notify(`UPDATE!!! ON (${pausedCount})`);
   }else{
     updateModeOn=false;
@@ -1079,11 +1201,12 @@ function toggleUpdateMode(checked){
       if(r.status==='Paused'&&r.pauseType==='update'){
         r.pauseType=null;
         r.pauseUntil=null;
-        r.status=(r.startedAt&&r.durationMs&&(r.startedAt+r.durationMs<=Date.now()))?'Expired':'Active';
+        r.status=(r.startedAt&&r.durationMs&&(r.startedAt+r.durationMs<=now))?'Expired':'Active';
+        r.modifiedAt=now;
         restoredCount++;
       }
     });
-    persist();renderAll();
+    persist('merge');renderAll();
     notify(`UPDATE!!! OFF (${restoredCount})`);
   }
 }
@@ -1154,6 +1277,7 @@ function createRecord(e){
   const name=($('#newName').value||'').trim()||'Key';
   const desc=($('#newDesc').value||'').trim()||'—';
   const durationMs=durationToMs(unit,val);
+  const now=Date.now();
 
   const r={
     id:uid(),
@@ -1165,11 +1289,12 @@ function createRecord(e){
     pauseUntil:null,
     deviceLimit:+($('#newDeviceLimit').value||1),
     created:new Date().toISOString().slice(0,16).replace('T',' '),
+    modifiedAt:now,
     key:buildKeyValue({type,prefix,unit,val,customKey}),
     durationMs,
     startedAt:null
   };
-  records.unshift(r);persist();closeModal();renderAll();notify('OK');
+  records.unshift(r);persist('merge');closeModal();renderAll();notify('OK');
   modal('Key Created',`<div class="key-cell" style="width:100%"><button type="button" class="copy-icon-btn" style="width:36px;height:36px;flex:0 0 36px" title="Copy" onclick="copyTextValue($('#createdKey').value)">${COPY_ICON_SVG}</button><input style="width:100%;background:#070709;color:#fff;border:1px solid #24242f;padding:10px;border-radius:7px;font-family:'JetBrains Mono',monospace" id="createdKey" value="${esc(r.key)}" readonly></div>
     <div class="modal-actions">
       <button class="secondary" onclick="copyTextValue($('#createdKey').value)">Copy</button>
@@ -1227,13 +1352,15 @@ function copyBannedKey(id){const b=banned.find(x=>x.id===id);if(b)copyTextValue(
 
 function simulateConnect(id){
   const r=records.find(x=>x.id===id);if(!r)return;
+  const now=Date.now();
   if(!r.startedAt){
-    r.startedAt=Date.now();
+    r.startedAt=now;
     notify('Timer started');
   }
+  r.modifiedAt=now;
   const ip='192.168.1.'+(Math.floor(Math.random()*200)+10);
-  deviceSessions.unshift({id:uid(),keyId:id,ip,status:'Active',at:new Date().toLocaleString()});
-  persist();renderAll();rowMenu(id);
+  deviceSessions.unshift({id:uid(),keyId:id,ip,status:'Active',at:new Date().toLocaleString(),modifiedAt:now});
+  persist('merge');renderAll();rowMenu(id);
 }
 
 function customDeviceModal(id,mode){
@@ -1255,7 +1382,8 @@ function applyCustomDevice(id,mode){
   const amt=Math.max(1,+$('#customDevAmt').value||1);
   const cur=r.deviceLimit===0?1:(r.deviceLimit||1);
   r.deviceLimit=mode==='add'?(cur+amt):Math.max(1,cur-amt);
-  persist();renderAll();rowMenu(id);notify(`Devices: ${r.deviceLimit}`);
+  r.modifiedAt=Date.now();
+  persist('merge');renderAll();rowMenu(id);notify(`Devices: ${r.deviceLimit}`);
 }
 
 function customTimeModal(id,mode){
@@ -1277,25 +1405,27 @@ function applyTimeAdjust(id,mode){
   const amt=Math.max(1,+$('#adjAmt').value||1);
   const unit=$('#adjUnit').value;
   const delta=amt*(unit==='m'?60000:unit==='h'?3600000:86400000);
+  const now=Date.now();
   if(!r.durationMs){
     if(mode==='add'){
-      r.startedAt=r.startedAt||Date.now();
+      r.startedAt=r.startedAt||now;
       r.durationMs=delta;
     }
   }else{
     if(mode==='add'){
       r.durationMs+=delta;
-      if(r.status==='Expired'&&(r.startedAt||Date.now())+r.durationMs>Date.now()){
+      if(r.status==='Expired'&&(r.startedAt||now)+r.durationMs>now){
         r.status='Active';
       }
     }else{
       r.durationMs=Math.max(0,r.durationMs-delta);
-      if(r.startedAt&&(r.startedAt+r.durationMs)<=Date.now()){
+      if(r.startedAt&&(r.startedAt+r.durationMs)<=now){
         r.status='Expired';
       }
     }
   }
-  persist();renderAll();rowMenu(id);notify('Updated');
+  r.modifiedAt=now;
+  persist('merge');renderAll();rowMenu(id);notify('Updated');
 }
 
 function pauseIndefinite(id){
@@ -1303,7 +1433,8 @@ function pauseIndefinite(id){
   r.status='Paused';
   r.pauseType='manual';
   r.pauseUntil=null;
-  persist();renderAll();closeModal();notify('Paused');
+  r.modifiedAt=Date.now();
+  persist('merge');renderAll();closeModal();notify('Paused');
 }
 
 function pauseTimedModal(id){
@@ -1324,30 +1455,35 @@ function applyTimedPause(id){
   const amt=Math.max(1,+$('#pAmt').value||1);
   const unit=$('#pUnit').value;
   const ms=amt*(unit==='m'?60000:unit==='h'?3600000:86400000);
+  const now=Date.now();
   r.status='Paused';
   r.pauseType='temp';
-  r.pauseUntil=Date.now()+ms;
-  persist();renderAll();closeModal();notify('Temp paused');
+  r.pauseUntil=now+ms;
+  r.modifiedAt=now;
+  persist('merge');renderAll();closeModal();notify('Temp paused');
 }
 
 function resumeKey(id){
   const r=records.find(x=>x.id===id);if(!r)return;
+  const now=Date.now();
   r.pauseType=null;
   r.pauseUntil=null;
-  r.status=(r.startedAt&&r.durationMs&&(r.startedAt+r.durationMs<=Date.now()))?'Expired':'Active';
-  persist();renderAll();closeModal();notify('Resumed');
+  r.status=(r.startedAt&&r.durationMs&&(r.startedAt+r.durationMs<=now))?'Expired':'Active';
+  r.modifiedAt=now;
+  persist('merge');renderAll();closeModal();notify('Resumed');
 }
 
 function banRecord(id){
   const r=records.find(x=>x.id===id);if(!r)return;
-  banned.unshift({id:uid(),key:r.key,reason:'Banned by admin',date:new Date().toLocaleString()});
+  const banEntry={id:uid(),key:r.key,reason:'Banned by admin',date:new Date().toLocaleString(),modifiedAt:Date.now()};
+  banned.unshift(banEntry);
   records=records.filter(x=>x.id!==id);
-  persist(records.length===0);renderAll();closeModal();notify('Banned');
+  persist('ban_key',{id,key:r.key,banEntry});renderAll();closeModal();notify('Banned');
 }
 
 function deleteRecord(id){
   records=records.filter(x=>x.id!==id);
-  persist(records.length===0);renderAll();closeModal();notify('Deleted');
+  persist('delete_key',{id});renderAll();closeModal();notify('Deleted');
 }
 
 function generateKeys(){
@@ -1360,6 +1496,7 @@ function generateKeys(){
   const prefix=$('#genPrefix').value;
   const customKey=$('#genCustomKey').value;
   const durationMs=durationToMs(unit,val);
+  const now=Date.now();
   const out=[];
 
   for(let i=0;i<n;i++){
@@ -1380,13 +1517,14 @@ function generateKeys(){
       pauseUntil:null,
       deviceLimit:+$('#genDevices').value,
       created:new Date().toISOString().slice(0,16).replace('T',' '),
+      modifiedAt:now,
       key:keyVal,
       durationMs,
       startedAt:null
     };
     records.unshift(r);out.push(r.key);
   }
-  persist();
+  persist('merge');
   $('#generated').innerHTML=`<div style="display:flex;flex-direction:column;gap:6px;background:#070709;border:1px solid #24242f;padding:10px;border-radius:7px">${out.map((k,idx)=>`<div class="key-cell"><button type="button" class="copy-icon-btn" title="Copy" data-gen-copy="${idx}">${COPY_ICON_SVG}</button><span class="keycode">${esc(k)}</span></div>`).join('')}</div>
     <button class="secondary" style="margin-top:8px" onclick="copyTextValue(${JSON.stringify(out.join('\n'))})">Copy all</button>`;
   $('#generated').querySelectorAll('[data-gen-copy]').forEach(btn=>{
@@ -1404,9 +1542,12 @@ function openBan(){
 }
 function banManual(e){
   e.preventDefault();
-  banned.unshift({id:uid(),key:$('#banValue').value.trim(),reason:($('#banReason').value||'').trim()||'Banned',date:new Date().toLocaleString()});
-  records=records.filter(r=>r.key!==$('#banValue').value.trim());
-  persist(records.length===0);renderAll();closeModal();notify('Banned');
+  const keyVal=$('#banValue').value.trim();
+  const existing=records.find(r=>r.key===keyVal);
+  const banEntry={id:uid(),key:keyVal,reason:($('#banReason').value||'').trim()||'Banned',date:new Date().toLocaleString(),modifiedAt:Date.now()};
+  banned.unshift(banEntry);
+  records=records.filter(r=>r.key!==keyVal);
+  persist('ban_key',{id:existing?existing.id:'',key:keyVal,banEntry});renderAll();closeModal();notify('Banned');
 }
 function renderBanned(){
   $('#bannedRows').innerHTML=banned.map(b=>`<tr>
@@ -1416,8 +1557,12 @@ function renderBanned(){
     <td><button class="secondary" onclick="unban('${b.id}')">Unban</button></td>
   </tr>`).join('')||`<tr><td colspan="4" class="blank">—</td></tr>`;
 }
-function unban(id){banned=banned.filter(x=>x.id!==id);persist(true);renderAll()}
-function clearAllKeys(){records=[];deviceSessions=[];updateModeOn=false;persist(true);renderAll();notify('Cleared')}
+function unban(id){banned=banned.filter(x=>x.id!==id);persist('unban_key',{id});renderAll()}
+function clearAllKeys(){
+  if(!confirm('Bütün keyləri silmək istədiyinə əminsən?'))return;
+  records=[];deviceSessions=[];updateModeOn=false;
+  persist('clear_all_manual',{confirmClearAll:true});renderAll();notify('Cleared');
+}
 
 function exportTxt(){const lines=records.map(r=>r.key);download('api-keys.txt',lines.join('\n')+(lines.length?'\n':''),'text/plain')}
 function importTxt(file){
@@ -1425,18 +1570,19 @@ function importTxt(file){
   reader.onload=()=>{
     const lines=String(reader.result).split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
     let added=0;
+    const now=Date.now();
     for(const key of lines){
       if(records.some(r=>r.key===key))continue;
-      records.unshift({id:uid(),name:'Key',description:'—',type:'NORMAL',status:updateModeOn?'Paused':'Active',pauseType:updateModeOn?'update':null,pauseUntil:null,deviceLimit:1,created:new Date().toISOString().slice(0,16).replace('T',' '),key,durationMs:null,startedAt:null});
+      records.unshift({id:uid(),name:'Key',description:'—',type:'NORMAL',status:updateModeOn?'Paused':'Active',pauseType:updateModeOn?'update':null,pauseUntil:null,deviceLimit:1,created:new Date().toISOString().slice(0,16).replace('T',' '),modifiedAt:now,key,durationMs:null,startedAt:null});
       added++;
     }
-    persist();renderAll();notify(`+${added}`);
+    persist('merge');renderAll();notify(`+${added}`);
   };reader.readAsText(file);
 }
 function backupJson(){download('darkios-backup.json',JSON.stringify({records,banned,updateModeOn},null,2),'application/json')}
 function restoreJson(file){
   if(!file)return;const r=new FileReader();
-  r.onload=()=>{try{const d=JSON.parse(r.result);records=d.records||[];banned=d.banned||[];updateModeOn=!!d.updateModeOn;persist(true);renderAll();notify('Restored')}catch{notify('Invalid JSON')}};
+  r.onload=()=>{try{const d=JSON.parse(r.result);records=d.records||[];banned=d.banned||[];updateModeOn=!!d.updateModeOn;persist('merge');renderAll();notify('Restored')}catch{notify('Invalid JSON')}};
   r.readAsText(file);
 }
 function download(name,data,type){const a=document.createElement('a'),u=URL.createObjectURL(new Blob([data],{type}));a.href=u;a.download=name;a.click();URL.revokeObjectURL(u)}
@@ -1446,7 +1592,8 @@ applyLang();
 saveLocalCache();
 renderAll();
 setInterval(()=>{if($('#adminApp').style.display!=='none'){renderRows();renderUpdateUI()}},1000);
-setInterval(()=>{if($('#adminApp').style.display!=='none'&&!$('#modalBg').classList.contains('open')){pullFromServer(false)}},5000);
+setInterval(()=>{if($('#adminApp').style.display!=='none'&&!$('#modalBg').classList.contains('open')){pullFromServer(false)}},3000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&$('#adminApp').style.display!=='none'){pullFromServer(false)}});
 if(sessionStorage.getItem('darkios_auth')==='1'){$('#loginScreen').style.display='none';$('#adminApp').style.display='flex';pullFromServer(false)}
 </script>
 </body>
