@@ -262,6 +262,10 @@ extern "C" void OpenNewMenu(void) {
     });
 }
 
+extern "C" void RenderNewMenuOverlay(void) {
+    OpenNewMenu();
+}
+
 void (*orig_shoot_event)(USTExtraShootWeaponComponent*, FVector, FRotator, ASTExtraShootWeapon*, int) = nullptr;
 void (*orig_throw_grenade)(ASTExtraWeapon*, FVector, FRotator) = nullptr;
 void (*orig_shoot_underbarrel)(ASTExtraWeapon*, FVector, FRotator) = nullptr;
@@ -981,7 +985,7 @@ void RenderESP(AHUD* hud, int w, int h) {
                             (lootEsp.ammo && id >= 301001 && id < 400000) ||
                             (lootEsp.health && id >= 601001 && id < 602000) ||
                             (lootEsp.backpacks && (id >= 501001 && id <= 501006)) ||
-                            (lootEsp.helmets && id >= 502001 && id <= 502006) ||
+                            (lootEsp.helmets && id >= 502001 && id <= 502006)) ||
                             (lootEsp.vests && id >= 503001 && id <= 503006) ||
                             (lootEsp.metro_items && id >= 106001);
                 if (show) {
